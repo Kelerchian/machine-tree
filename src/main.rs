@@ -1,4 +1,3 @@
-use machinetree_macro;
 
 fn main() {
 
