@@ -1,7 +1,7 @@
 use crate::{
-    node::{Node, NodeOperationBridge, NodeSeed},
+    node::{Node, NodeOperationBridge},
+    node_seed::NodeSeed,
     worker::WorkerOperationBridge,
-    InputManagerBridge,
 };
 use std::{any::Any, cell::RefCell, collections::VecDeque};
 
@@ -13,9 +13,8 @@ pub type HeapDataCell = RefCell<HeapData>;
 pub(crate) type TypedHeapData<T> = Box<T>;
 pub type TypedHeapdataCell<T> = RefCell<TypedHeapData<T>>;
 
-pub type NodeStepFn = dyn Fn((&mut InputManagerBridge, &mut NodeOperationBridge)) -> Vec<NodeSeed>;
-pub(crate) type WorkerStepFn =
-    dyn Fn((&mut InputManagerBridge, &mut WorkerOperationBridge)) -> Box<dyn Any>;
+pub type NodeStepFn = dyn Fn(&mut NodeOperationBridge) -> Vec<NodeSeed>;
+pub(crate) type WorkerStepFn = dyn Fn(&mut WorkerOperationBridge) -> Box<dyn Any>;
 
 pub(crate) type NodeCell = RefCell<Node>;
 pub(crate) type Effect = Box<dyn FnOnce() -> ()>;

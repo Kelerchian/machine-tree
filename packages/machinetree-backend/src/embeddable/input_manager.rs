@@ -6,27 +6,29 @@ use std::{collections::VecDeque, intrinsics::transmute};
 
 #[derive(Default)]
 pub struct InputManager {
-    pub(crate) input_queue: VecDeque<Box<HeapDataCell>>,
     pub(crate) work_item_notifier: Option<WorkItemNotifier>,
+    pub(crate) input_queue: VecDeque<Box<HeapDataCell>>,
 }
 
 impl InputManager {
-    pub fn mutate<AssumedParamType: 'static, ReturnType>(
-        &mut self,
-        mutate_fn: MutateFn<AssumedParamType, ReturnType>,
-    ) -> Result<ReturnType, RuntimeError> {
+    fn validate_payload_type<AssumedType: 'static>(&self) -> VecDeque<RuntimeError> {
         let mut errs: VecDeque<RuntimeError> = Default::default();
 
-        // Validation for later unsafe transmute below
         self.input_queue.iter().for_each(|boxed_refcell| {
             let borrowed = boxed_refcell.as_ref().borrow();
-
-            if let None = borrowed.as_ref().downcast_ref::<AssumedParamType>() {
-                &errs.push_back(RuntimeError);
+            if let None = borrowed.as_ref().downcast_ref::<AssumedType>() {
+                errs.push_back(RuntimeError);
             }
         });
 
-        if errs.len() > 0 {
+        errs
+    }
+
+    pub(crate) fn mutate<AssumedParamType: 'static, ReturnType>(
+        &mut self,
+        mutate_fn: MutateFn<AssumedParamType, ReturnType>,
+    ) -> Result<ReturnType, RuntimeError> {
+        if self.validate_payload_type::<AssumedParamType>().len() > 0 {
             Err(RuntimeError)
         } else {
             // Swap->Transmute->Mutate->Transmute->Swap starts
@@ -45,24 +47,11 @@ impl InputManager {
         }
     }
 
-    pub fn peek<AssumedParamType: 'static, ReturnType>(
+    pub(crate) fn peek<AssumedParamType: 'static, ReturnType>(
         &mut self,
         peek_fn: PeekFn<AssumedParamType, ReturnType>,
     ) -> Result<ReturnType, RuntimeError> {
-        let mut errs: VecDeque<RuntimeError> = Default::default();
-
-        // Validation for later unsafe transmute below
-        self.input_queue
-            .iter()
-            .for_each(|boxed_refcell: &Box<HeapDataCell>| {
-                let borrowed_refcell = boxed_refcell.as_ref().borrow();
-
-                if let None = borrowed_refcell.as_ref().downcast_ref::<AssumedParamType>() {
-                    &errs.push_back(RuntimeError);
-                }
-            });
-
-        if errs.len() > 0 {
+        if self.validate_payload_type::<AssumedParamType>().len() > 0 {
             Err(RuntimeError)
         } else {
             // Swap->Transmute->Mutate->Transmute->Swap starts
@@ -79,15 +68,19 @@ impl InputManager {
         }
     }
 
-    pub fn notify_change_to_host(&self) {
+    pub(crate) fn notify_change_to_host(&self) {
         if let Some(work_item_sender) = &self.work_item_notifier {
             work_item_sender.notify();
         }
     }
 
-    pub fn push(&mut self, data: Box<HeapDataCell>) -> () {
-        // TODO: determine EQ
+    pub(crate) fn push(&mut self, data: Box<HeapDataCell>) -> () {
         self.input_queue.push_back(data);
+        self.notify_change_to_host();
+    }
+
+    pub(crate) fn push_many(&mut self, mut data: VecDeque<Box<HeapDataCell>>) -> () {
+        self.input_queue.append(&mut data);
         self.notify_change_to_host();
     }
 }
@@ -112,8 +105,12 @@ impl<'a> InputManagerBridge<'a> {
         self.input_manager.peek(peek_fn)
     }
 
-    pub fn queue_len(&self) -> usize {
-        self.input_manager.input_queue.len()
+    pub fn push(&mut self, data: Box<HeapDataCell>) -> () {
+        self.input_manager.input_queue.push_back(data);
+    }
+
+    pub fn push_many(&mut self, mut data: VecDeque<Box<HeapDataCell>>) -> () {
+        self.input_manager.input_queue.append(&mut data);
     }
 }
 

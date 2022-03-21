@@ -1,17 +1,14 @@
-pub mod input_manager;
+pub mod embeddable;
 pub mod node;
-pub mod patch_manager;
+pub mod node_seed;
 pub mod typedef;
 pub mod worker;
 
-use input_manager::{InputManager, InputManagerBridge};
-use node::NodeSeed;
-use patch_manager::PatchManager;
+use node_seed::NodeSeed;
 use typedef::*;
 use worker::Worker;
 
 use std::{
-    borrow::BorrowMut,
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
     rc::Rc,
@@ -40,6 +37,12 @@ impl From<&Rc<NodeCell>> for NodeHashKey {
         NodeHashKey(node_rc.clone())
     }
 }
+
+// TODO: create many kinds of workitem
+// Unique workitem
+// Input workitem (which is unique and precede effect workitem in a batch)
+// Effect workitem (which is unique)
+// Rerender workitem (which is unique and succeed effect workitem in a batch)
 
 #[derive(Clone)]
 pub(crate) enum WorkItem {
@@ -123,51 +126,59 @@ impl NodeHost {
                 WorkItem::Node(node) => {
                     // Ignore nodes that have been destroyed
                     if let Some(children) = self.child_map.get_mut(&NodeHashKey::from(&node)) {
-                        let seeds = {
+                        let seeds_res = {
                             let mut borrowed = (*node).borrow_mut();
                             borrowed.run()
                         };
 
-                        let mut destroyable_node_rc_set: HashSet<NodeHashKey> = Default::default();
-                        let mut insertable_hash_keys: Vec<NodeHashKey> = Default::default();
+                        match seeds_res {
+                            Ok(seeds) => {
+                                let mut destroyable_node_rc_set: HashSet<NodeHashKey> =
+                                    Default::default();
+                                let mut insertable_hash_keys: Vec<NodeHashKey> = Default::default();
 
-                        // Replace children value
-                        (*children) = seeds
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, seed)| -> Rc<NodeCell> {
-                                let host_sender = &self.work_channels.0;
-                                let child = match children.get_mut(index) {
-                                    None => NodeSeed::into_node_cell_rc(seed, host_sender),
-                                    Some(child) => match NodeSeed::try_merge(seed, child) {
-                                        Err(seed) => {
-                                            destroyable_node_rc_set
-                                                .insert(NodeHashKey::from(&*child));
-                                            NodeSeed::into_node_cell_rc(seed, host_sender)
+                                // Replace children value
+                                (*children) = seeds
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(index, seed)| -> Rc<NodeCell> {
+                                        let host_sender = &self.work_channels.0;
+                                        let child = match children.get_mut(index) {
+                                            None => NodeSeed::into_node_cell_rc(seed, host_sender),
+                                            Some(child) => match NodeSeed::try_merge(seed, child) {
+                                                Err(seed) => {
+                                                    destroyable_node_rc_set
+                                                        .insert(NodeHashKey::from(&*child));
+                                                    NodeSeed::into_node_cell_rc(seed, host_sender)
+                                                }
+                                                // Optimize
+                                                Ok(_) => child.clone(),
+                                            },
+                                        };
+
+                                        insertable_hash_keys.push(NodeHashKey::from(&child));
+
+                                        child
+                                    })
+                                    .collect();
+
+                                // For removed nodes: remove them from being HashMap keys
+                                destroyable_node_rc_set.iter().for_each(|item| {
+                                    self.remove_node_recursively(item);
+                                });
+
+                                insertable_hash_keys
+                                    .into_iter()
+                                    .for_each(|item: NodeHashKey| {
+                                        if let None = self.child_map.get(&item) {
+                                            self.child_map.insert(item, vec![]);
                                         }
-                                        // Optimize
-                                        Ok(_) => child.clone(),
-                                    },
-                                };
-
-                                insertable_hash_keys.push(NodeHashKey::from(&child));
-
-                                child
-                            })
-                            .collect();
-
-                        // For removed nodes: remove them from being HashMap keys
-                        destroyable_node_rc_set.iter().for_each(|item| {
-                            self.remove_node_recursively(item);
-                        });
-
-                        insertable_hash_keys
-                            .into_iter()
-                            .for_each(|item: NodeHashKey| {
-                                if let None = self.child_map.get(&item) {
-                                    self.child_map.insert(item, vec![]);
-                                }
-                            });
+                                    });
+                            }
+                            Err(_) => {
+                                // TODO: handle runtime errors
+                            }
+                        }
                     }
                 }
                 WorkItem::Worker(_, _) => {
