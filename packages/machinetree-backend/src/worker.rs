@@ -5,24 +5,25 @@ use std::{
 };
 
 use crate::{
-    param_manager::{ParamManager, ParamManagerBridge},
+    input_manager::{InputManager, InputManagerBridge},
     patch_manager::PatchManager,
     typedef::{Effect, HeapData, HeapDataCell, WorkerStepFn},
 };
 
-pub struct WorkerMutationBridge<'a> {
+pub struct WorkerOperationBridge<'a> {
     worker: &'a Worker,
+    is_mutated: bool,
 }
 
-impl<'a> WorkerMutationBridge<'a> {
-    fn read_state_with<Res, ReadFunction: Fn(&HeapData) -> Res>(
+impl<'a> WorkerOperationBridge<'a> {
+    pub fn read<Res, ReadFunction: Fn(&HeapData) -> Res>(
         &self,
         read_function: ReadFunction,
     ) -> Res {
         read_function(&*self.worker.state.borrow())
     }
 
-    fn mutate_state_later_with<MutateFunction>(
+    pub fn mutate<MutateFunction>(
         &mut self,
         mutate_function: Box<dyn FnOnce(&mut HeapData) -> ()>,
     ) -> Result<(), ()> {
@@ -35,6 +36,7 @@ impl<'a> WorkerMutationBridge<'a> {
         match self.worker.patch_manager.write() {
             Ok(mut patch_manager) => {
                 patch_manager.push_patch(effect);
+                self.is_mutated = true;
                 Ok(())
             }
             Err(x) => Err(()),
@@ -42,8 +44,17 @@ impl<'a> WorkerMutationBridge<'a> {
     }
 }
 
+impl<'a> From<&'a Worker> for WorkerOperationBridge<'a> {
+    fn from(worker: &'a Worker) -> Self {
+        WorkerOperationBridge {
+            worker,
+            is_mutated: false,
+        }
+    }
+}
+
 pub struct Worker {
-    param_manager: RefCell<ParamManager>,
+    input_manager: RefCell<InputManager>,
     patch_manager: Arc<RwLock<PatchManager>>,
     state: Rc<HeapDataCell>,
     step_fn: Box<WorkerStepFn>,
@@ -53,6 +64,13 @@ pub struct Worker {
 impl Worker {
     pub fn destroy(&self) {
         // TODO: implement
+    }
+
+    pub fn append_param(&mut self, data: Box<HeapDataCell>) {
+        {
+            let mut input_manager = self.input_manager.borrow_mut();
+            input_manager.push(data);
+        }
     }
 
     pub fn swap_patches(&self) {
@@ -68,12 +86,10 @@ impl Worker {
 
     pub fn run(&self) {
         let step_fn = &self.step_fn;
-        let param_manager = &mut (*self.param_manager.borrow_mut());
-        let mut mutation_bridge = WorkerMutationBridge { worker: self };
-        let mut param_manager_bridge: ParamManagerBridge = From::from(param_manager);
-
-        while param_manager_bridge.param_manager.consume_queue() {
-            step_fn((&mut param_manager_bridge, &mut mutation_bridge));
-        }
+        let mut input_manager_mut_ref = self.input_manager.borrow_mut();
+        let mut operation_bridge = WorkerOperationBridge::from(self);
+        let mut input_manager_bridge = InputManagerBridge::from(&mut *input_manager_mut_ref);
+        step_fn((&mut input_manager_bridge, &mut operation_bridge));
+        // TODO: signal change to node and host
     }
 }

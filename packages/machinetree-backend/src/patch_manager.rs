@@ -1,9 +1,11 @@
-use crate::typedef::Effect;
+use crate::{typedef::Effect, WorkItemNotifier};
 use std::{collections::VecDeque, mem};
 
+#[derive(Default)]
 pub struct PatchManager {
-    current: VecDeque<Effect>,
-    next: VecDeque<Effect>,
+    pub(crate) current: VecDeque<Effect>,
+    pub(crate) next: VecDeque<Effect>,
+    pub(crate) work_item_notifier: Option<WorkItemNotifier>,
 }
 
 impl PatchManager {
@@ -24,5 +26,12 @@ impl PatchManager {
 
     pub fn push_patch(&mut self, patch: Effect) -> () {
         self.next.push_back(patch);
+        self.notify_change_to_host();
+    }
+
+    pub fn notify_change_to_host(&self) {
+        if let Some(work_item_sender) = &self.work_item_notifier {
+            work_item_sender.notify();
+        }
     }
 }
