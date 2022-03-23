@@ -3,7 +3,7 @@ use std::{any::TypeId, cell::RefCell, rc::Rc};
 use crate::{
     node::Node,
     typedef::{HeapDataCell, NodeCell, NodeStepFn},
-    WorkItem, WorkItemNotifier,
+    WorkItem, WorkItemKind, WorkItemNotifier, WorkItemSource,
 };
 
 /**
@@ -53,38 +53,37 @@ impl NodeSeed {
         // TODO: rename, it is ugly
         sender: &crossbeam::channel::Sender<WorkItem>,
     ) -> Rc<RefCell<Node>> {
-        let step_fn = (seed.generate_step_fn)();
-
-        let node = Node {
+        let node_rc = Rc::new(RefCell::new(Node {
             type_id: seed.type_id,
             key: seed.key.clone(),
             input_manager: Default::default(),
             effect_manager: Default::default(),
             workers: Default::default(),
-            step_fn,
-        };
+            step_fn: (seed.generate_step_fn)(),
+        }));
 
-        let node_rc = Rc::new(RefCell::new(node));
         {
             let node = node_rc.borrow();
 
             if let Ok(mut effect_manager_write_guard) = node.effect_manager.write() {
-                let work_item = WorkItem::from(&node_rc);
-                let work_item_notifier = WorkItemNotifier::from_work_item(work_item, &sender);
-                effect_manager_write_guard.work_item_notifier = Some(work_item_notifier);
-                drop(effect_manager_write_guard);
+                effect_manager_write_guard.work_item_notifier =
+                    Some(WorkItemNotifier::from_work_item_source(
+                        WorkItemSource::from(&node_rc),
+                        &sender,
+                    ));
             }
 
             {
                 let mut input_manager = node.input_manager.borrow_mut();
-                let work_item = WorkItem::from(&node_rc);
                 (*input_manager).work_item_notifier =
-                    Some(WorkItemNotifier::from_work_item(work_item, &sender));
+                    Some(WorkItemNotifier::from_work_item_source(
+                        WorkItemSource::from(&node_rc),
+                        &sender,
+                    ));
             }
 
             // IMPORTANT: must be done after patch_manager.on_mutate_listener is installed
             node.consume_seed(seed);
-            drop(node);
 
             // TODO: error handling for "else" block
             // which is a never scenario

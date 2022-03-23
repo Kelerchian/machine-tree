@@ -51,7 +51,7 @@ impl Node {
         // These codes are put in a bloc kto avoid borrowing param manager twice
         let step_fn = &self.step_fn;
         let mut input_manager_mut_ref = self.input_manager.borrow_mut();
-        let mut effect_manager_write_lock = self.effect_manager.write();
+        let effect_manager_write_lock = self.effect_manager.write();
 
         match effect_manager_write_lock {
             Ok(mut effect_manager_mut_ref) => {

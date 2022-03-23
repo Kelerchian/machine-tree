@@ -1,6 +1,6 @@
 use crate::{
     typedef::{HeapDataCell, MutateFn, PeekFn, RuntimeError, TypedHeapdataCell},
-    WorkItemNotifier,
+    WorkItemKind, WorkItemNotifier,
 };
 use std::{collections::VecDeque, intrinsics::transmute};
 
@@ -70,7 +70,7 @@ impl InputManager {
 
     pub(crate) fn notify_change_to_host(&self) {
         if let Some(work_item_sender) = &self.work_item_notifier {
-            work_item_sender.notify();
+            work_item_sender.notify(WorkItemKind::Step);
         }
     }
 

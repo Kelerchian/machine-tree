@@ -1,9 +1,9 @@
 use crate::{
     node::{Node, NodeOperationBridge},
     node_seed::NodeSeed,
-    worker::WorkerOperationBridge,
+    worker::{Worker, WorkerOperationBridge},
 };
-use std::{any::Any, cell::RefCell, collections::VecDeque};
+use std::{any::Any, cell::RefCell, collections::VecDeque, rc::Rc};
 
 // TODO: explain why they need to be here
 
@@ -17,6 +17,10 @@ pub type NodeStepFn = dyn Fn(&mut NodeOperationBridge) -> Vec<NodeSeed>;
 pub(crate) type WorkerStepFn = dyn Fn(&mut WorkerOperationBridge) -> Box<dyn Any>;
 
 pub(crate) type NodeCell = RefCell<Node>;
+pub(crate) type NodeCellRc = Rc<NodeCell>;
+pub(crate) type WorkerCell = RefCell<Worker>;
+pub(crate) type WorkerCellRc = Rc<WorkerCell>;
+
 pub(crate) type Effect = Box<dyn FnOnce() -> ()>;
 
 pub type PeekFn<AssumedHeapdataType, ReturnType> =

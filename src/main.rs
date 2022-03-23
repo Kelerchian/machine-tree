@@ -1,8 +1,8 @@
 use machinetree_backend::{
     self,
+    node_host::NodeHost,
     node_seed::NodeSeed,
     typedef::{HeapDataCell, NodeStepFn},
-    NodeHost,
 };
 use std::cell::RefCell;
 

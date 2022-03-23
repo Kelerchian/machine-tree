@@ -10,7 +10,7 @@ use crate::{
         effect_manager::{self, EffectManager, EffectManagerBridge},
         input_manager::{self, InputManager, InputManagerBridge},
     },
-    typedef::{Effect, HeapData, HeapDataCell, WorkerStepFn},
+    typedef::{Effect, HeapData, HeapDataCell, RuntimeError, WorkerStepFn},
 };
 
 pub struct WorkerOperationBridge<'a> {
@@ -56,7 +56,7 @@ impl Worker {
     //     };
     // }
 
-    pub fn run(&self) {
+    pub fn run(&self) -> Result<(), RuntimeError> {
         let step_fn = &self.step_fn;
         let mut input_manager_mut_ref = self.input_manager.borrow_mut();
         let effect_manager_write_lock = self.effect_manager.write();
@@ -68,9 +68,11 @@ impl Worker {
                     &mut effect_manager_mut_ref,
                 );
                 step_fn(&mut operation_bridge);
+                Ok(())
             }
             Err(x) => {
-                // TODO: signal error
+                // TODO: signal error better
+                Err(RuntimeError)
             }
         }
         // TODO: signal change to node and host
