@@ -1,5 +1,5 @@
 use crate::{typedef::Effect, WorkItemKind, WorkItemNotifier};
-use std::{collections::VecDeque, mem};
+use std::collections::VecDeque;
 
 #[derive(Default)]
 pub struct EffectManager {
