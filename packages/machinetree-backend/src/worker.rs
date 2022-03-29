@@ -1,35 +1,40 @@
 use std::{
-    borrow::BorrowMut,
     cell::RefCell,
-    rc::Rc,
     sync::{Arc, RwLock},
 };
 
 use crate::{
     embeddable::{
-        effect_manager::{self, EffectManager, EffectManagerBridge},
-        input_manager::{self, InputManager, InputManagerBridge},
+        effect_manager::{EffectExecutionBridge, EffectManager, EffectBridge},
+        input_manager::{InputManager, InputBridge},
+        state_manager::{StateManager, StateBridge},
     },
-    typedef::{Effect, HeapData, HeapDataCell, RuntimeError, WorkerStepFn},
+    typedef::{RuntimeError, WorkerStepFn},
 };
 
 pub struct WorkerOperationBridge<'a> {
-    pub input: InputManagerBridge<'a>,
-    pub effect: EffectManagerBridge<'a>,
+    pub input: InputBridge<'a>,
+    pub effect: EffectBridge<'a>,
+    pub state: StateBridge<'a>,
 }
 
 impl<'a> WorkerOperationBridge<'a> {
-    fn new(input: &'a mut InputManager, effect: &'a mut EffectManager) -> Self {
+    fn new(
+        input: &'a mut InputManager,
+        state: &'a mut StateManager,
+        effect: &'a mut EffectManager,
+    ) -> Self {
         Self {
-            input: InputManagerBridge::from(input),
-            effect: EffectManagerBridge::from(effect),
+            state: state.into(),
+            input: input.into(),
+            effect: effect.into(),
         }
     }
 }
 pub struct Worker {
     pub(crate) input_manager: RefCell<InputManager>,
+    pub(crate) state_manager: RefCell<StateManager>,
     pub(crate) effect_manager: Arc<RwLock<EffectManager>>,
-    pub(crate) state: Rc<HeapDataCell>,
     pub(crate) step_fn: Box<WorkerStepFn>,
     pub(crate) destroy_fn: Box<WorkerStepFn>,
 }
@@ -56,17 +61,16 @@ impl Worker {
     //     };
     // }
 
-    pub fn run(&self) -> Result<(), RuntimeError> {
+    pub fn run_step(&self) -> Result<(), RuntimeError> {
         let step_fn = &self.step_fn;
-        let mut input_manager_mut_ref = self.input_manager.borrow_mut();
+        let mut input_ref = self.input_manager.borrow_mut();
+        let mut state_ref = self.state_manager.borrow_mut();
         let effect_manager_write_lock = self.effect_manager.write();
 
         match effect_manager_write_lock {
-            Ok(mut effect_manager_mut_ref) => {
-                let mut operation_bridge = WorkerOperationBridge::new(
-                    &mut input_manager_mut_ref,
-                    &mut effect_manager_mut_ref,
-                );
+            Ok(mut effect_ref) => {
+                let mut operation_bridge =
+                    WorkerOperationBridge::new(&mut input_ref, &mut state_ref, &mut effect_ref);
                 step_fn(&mut operation_bridge);
                 Ok(())
             }
@@ -76,5 +80,24 @@ impl Worker {
             }
         }
         // TODO: signal change to node and host
+    }
+
+    pub fn run_effect(&self) -> Result<(), RuntimeError> {
+        let mut input_ref = self.input_manager.borrow_mut();
+        let mut state_ref = self.state_manager.borrow_mut();
+        let effect_manager_write_lock = self.effect_manager.write();
+
+        match effect_manager_write_lock {
+            Ok(mut effect_ref) => {
+                let mut effect_execution_bridge =
+                    EffectExecutionBridge::new(&mut input_ref, &mut state_ref);
+                effect_ref.run_all(&mut effect_execution_bridge);
+                Ok(())
+            }
+            Err(x) => {
+                // TODO: signal error better
+                Err(RuntimeError)
+            }
+        }
     }
 }

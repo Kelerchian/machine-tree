@@ -52,19 +52,19 @@ impl StateManager {
         Ok(result)
     }
 
-    pub(crate) fn notify_change_to_host(&self) {
+    pub(crate) fn notify_work(&self) {
         if let Some(work_item_sender) = &self.work_item_notifier {
-            work_item_sender.notify(WorkItemKind::Step);
+            work_item_sender.notify(WorkItemKind::StepIssued, false);
         }
     }
 }
 
 // TODO: explain why bridges, what does it serve
-pub struct StateManagerBridge<'a> {
+pub struct StateBridge<'a> {
     pub(crate) state_manager: &'a mut StateManager,
 }
 
-impl<'a> StateManagerBridge<'a> {
+impl<'a> StateBridge<'a> {
     pub fn peek<AssumedParamType: Default + 'static, ReturnType>(
         &mut self,
         key: &String,
@@ -82,8 +82,10 @@ impl<'a> StateManagerBridge<'a> {
     }
 }
 
-impl<'a> From<&'a mut StateManager> for StateManagerBridge<'a> {
-    fn from(state_manager: &'a mut StateManager) -> Self {
-        StateManagerBridge { state_manager }
+impl<'a> Into<StateBridge<'a>> for &'a mut StateManager {
+    fn into(self) -> StateBridge<'a> {
+        StateBridge {
+            state_manager: self,
+        }
     }
 }

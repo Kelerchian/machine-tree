@@ -1,4 +1,5 @@
 use crate::{
+    embeddable::effect_manager::EffectExecutionBridge,
     node::{Node, NodeOperationBridge},
     node_seed::NodeSeed,
     worker::{Worker, WorkerOperationBridge},
@@ -21,14 +22,13 @@ pub(crate) type NodeCellRc = Rc<NodeCell>;
 pub(crate) type WorkerCell = RefCell<Worker>;
 pub(crate) type WorkerCellRc = Rc<WorkerCell>;
 
-pub(crate) type Effect = Box<dyn FnOnce() -> ()>;
+pub(crate) type Effect = Box<dyn FnOnce(&mut EffectExecutionBridge) -> ()>;
 
-pub type PeekFn<AssumedHeapdataType, ReturnType> =
-    Box<dyn Fn(&AssumedHeapdataType) -> ReturnType>;
-    // Box<dyn Fn(&VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
+pub type PeekFn<AssumedHeapdataType, ReturnType> = Box<dyn Fn(&AssumedHeapdataType) -> ReturnType>;
+// Box<dyn Fn(&VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
 
 pub type MutateFn<AssumedHeapdataType, ReturnType> =
     Box<dyn Fn(&mut AssumedHeapdataType) -> ReturnType>;
-    // Box<dyn Fn(&mut VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
+// Box<dyn Fn(&mut VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
 
 pub struct RuntimeError;

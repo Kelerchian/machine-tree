@@ -51,6 +51,7 @@ impl From<&Rc<NodeCell>> for NodeHashKey {
 
 #[derive(Clone)]
 pub(crate) struct WorkItem {
+    priority: bool,
     kind: WorkItemKind,
     source: WorkItemSource,
 }
@@ -69,8 +70,9 @@ impl From<&NodeCellRc> for WorkItemSource {
 
 #[derive(Clone)]
 pub(crate) enum WorkItemKind {
-    Step,
-    Effect,
+    StepIssued,
+    EffectAvailable,
+    EffectExecuted,
 }
 
 pub(crate) struct WorkItemNotifier {
@@ -79,14 +81,28 @@ pub(crate) struct WorkItemNotifier {
 }
 
 impl WorkItemNotifier {
-    pub(crate) fn notify(&self, kind: WorkItemKind) {
+    pub(crate) fn notify(&self, kind: WorkItemKind, high_priority: bool) {
         if let Err(error) = self.sender.send(WorkItem {
             kind,
             source: self.source.clone(),
+            priority: high_priority,
         }) {
             eprintln!("{:?}", error);
         }
     }
+
+    // pub(crate) fn notify_to_host_node(&self, kind: WorkItemKind, high_priority: bool) {
+    //     if let Err(error) = self.sender.send(WorkItem {
+    //         kind,
+    //         source: match &self.source {
+    //             WorkItemSource::Node(_) => self.source.clone(),
+    //             WorkItemSource::Worker(node, _) => WorkItemSource::Node(node.clone()),
+    //         },
+    //         priority: high_priority,
+    //     }) {
+    //         eprintln!("{:?}", error);
+    //     }
+    // }
 
     pub(crate) fn from_work_item_source(
         source: WorkItemSource,

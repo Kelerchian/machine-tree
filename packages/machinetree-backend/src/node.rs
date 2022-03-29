@@ -1,10 +1,11 @@
 use crate::{
     embeddable::{
-        effect_manager::{EffectManager, EffectManagerBridge},
-        input_manager::{InputManager, InputManagerBridge},
+        effect_manager::{EffectManager, EffectBridge},
+        input_manager::{InputBridge, InputManager},
+        state_manager::{StateManager, StateBridge},
     },
     node_seed::NodeSeed,
-    typedef::{NodeStepFn, RuntimeError},
+    typedef::{HeapDataCell, NodeStepFn, RuntimeError},
     worker::Worker,
 };
 use std::{
@@ -29,6 +30,7 @@ pub struct Node {
     pub(crate) type_id: TypeId,
     pub(crate) key: Option<String>,
     pub(crate) input_manager: RefCell<InputManager>,
+    pub(crate) state_manager: RefCell<StateManager>,
     pub(crate) effect_manager: Arc<RwLock<EffectManager>>,
     pub(crate) workers: RefCell<HashMap<String, Rc<RefCell<Worker>>>>,
     pub(crate) step_fn: Box<NodeStepFn>,
@@ -44,19 +46,21 @@ impl Node {
     //         Err(_poison_error) => {
     //             // TODO: tell the host there's a poison error
     //         }
-    //     };
+    //     }    
     // }
 
     pub fn run<'a>(&'a mut self) -> Result<Vec<NodeSeed>, RuntimeError> {
         // These codes are put in a bloc kto avoid borrowing param manager twice
         let step_fn = &self.step_fn;
         let mut input_manager_mut_ref = self.input_manager.borrow_mut();
+        let mut state_manager_mut_ref = self.state_manager.borrow_mut();
         let effect_manager_write_lock = self.effect_manager.write();
 
         match effect_manager_write_lock {
             Ok(mut effect_manager_mut_ref) => {
                 let mut operation_bridge = NodeOperationBridge::new(
                     &mut input_manager_mut_ref,
+                    &mut state_manager_mut_ref,
                     &mut effect_manager_mut_ref,
                 );
                 let seeds = step_fn(&mut operation_bridge);
@@ -69,22 +73,28 @@ impl Node {
         }
     }
 
-    pub fn consume_seed(&self, seed: NodeSeed) {
+    pub fn consume_input(&self, input: Box<HeapDataCell>) {
         let mut input_manager = self.input_manager.borrow_mut();
-        input_manager.push(seed.input);
+        input_manager.push(input);
     }
 }
 // TODO: explain capabilities
 pub struct NodeOperationBridge<'a> {
-    pub input: InputManagerBridge<'a>,
-    pub effect: EffectManagerBridge<'a>,
+    pub input: InputBridge<'a>,
+    pub effect: EffectBridge<'a>,
+    pub state: StateBridge<'a>,
 }
 
 impl<'a> NodeOperationBridge<'a> {
-    fn new(input: &'a mut InputManager, effect: &'a mut EffectManager) -> Self {
+    fn new(
+        input: &'a mut InputManager,
+        state: &'a mut StateManager,
+        effect: &'a mut EffectManager,
+    ) -> Self {
         Self {
-            input: InputManagerBridge::from(input),
-            effect: EffectManagerBridge::from(effect),
+            input: input.into(),
+            state: state.into(),
+            effect: effect.into(),
         }
     }
 

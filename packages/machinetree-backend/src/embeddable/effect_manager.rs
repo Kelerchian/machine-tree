@@ -1,6 +1,25 @@
 use crate::{typedef::Effect, WorkItemKind, WorkItemNotifier};
 use std::collections::VecDeque;
 
+use super::{
+    input_manager::{InputBridge, InputManager},
+    state_manager::{StateBridge, StateManager},
+};
+
+pub struct EffectExecutionBridge<'a> {
+    state: StateBridge<'a>,
+    input: InputBridge<'a>,
+}
+
+impl<'a> EffectExecutionBridge<'a> {
+    pub(crate) fn new(input: &'a mut InputManager, state: &'a mut StateManager) -> Self {
+        EffectExecutionBridge {
+            input: input.into(),
+            state: state.into(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct EffectManager {
     pub(crate) work_item_notifier: Option<WorkItemNotifier>,
@@ -13,15 +32,15 @@ impl EffectManager {
         self.next.push_back(effect);
     }
 
-    pub(crate) fn run_all(&mut self) {
+    pub(crate) fn run_all(&mut self, effect_bridge: &mut EffectExecutionBridge) {
         let mut is_executed_at_least_once = false;
         while let Some(effect) = self.current.pop_front() {
-            effect();
+            effect(effect_bridge);
             is_executed_at_least_once = true;
         }
 
         if is_executed_at_least_once {
-            self.notify_change_to_host(WorkItemKind::Step);
+            self.notify_work(WorkItemKind::EffectExecuted);
         }
 
         self.load_next();
@@ -30,40 +49,34 @@ impl EffectManager {
     pub(crate) fn load_next(&mut self) -> () {
         self.current.append(&mut self.next);
         if self.current.len() > 0 {
-            self.notify_change_to_host(WorkItemKind::Effect);
+            self.notify_work(WorkItemKind::EffectAvailable);
         }
     }
 
-    pub(crate) fn notify_change_to_host(&self, work_item_kind: WorkItemKind) {
+    pub(crate) fn notify_work(&self, work_item_kind: WorkItemKind) {
         if let Some(work_item_sender) = &self.work_item_notifier {
-            work_item_sender.notify(work_item_kind);
+            work_item_sender.notify(work_item_kind, false);
         }
     }
 }
 
-pub struct EffectManagerBridge<'a> {
+pub struct EffectBridge<'a> {
     pub(crate) is_pushed_at_least_once: bool,
     pub(crate) effect_manager: &'a mut EffectManager,
 }
 
-impl<'a> Drop for EffectManagerBridge<'a> {
-    fn drop(&mut self) {
-        self.effect_manager.load_next();
-    }
-}
-
-impl<'a> EffectManagerBridge<'a> {
+impl<'a> EffectBridge<'a> {
     pub fn push(&mut self, effect: Effect) -> () {
         self.effect_manager.push(effect);
         self.is_pushed_at_least_once = true;
     }
 }
 
-impl<'a> From<&'a mut EffectManager> for EffectManagerBridge<'a> {
-    fn from(effect_manager: &'a mut EffectManager) -> Self {
-        EffectManagerBridge {
+impl<'a> Into<EffectBridge<'a>> for &'a mut EffectManager {
+    fn into(self) -> EffectBridge<'a> {
+        EffectBridge {
             is_pushed_at_least_once: Default::default(),
-            effect_manager,
+            effect_manager: self,
         }
     }
 }

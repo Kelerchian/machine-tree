@@ -41,7 +41,8 @@ impl InputManager {
             std::mem::swap(&mut swappable_temp, &mut self.input_queue);
             let transmuted: VecDeque<Box<TypedHeapDataCell<AssumedParamType>>> =
                 unsafe { transmute(swappable_temp) };
-            let result = peek_fn(&transmuted);
+            let result =
+                peek_fn(&transmuted as &VecDeque<Box<TypedHeapDataCell<AssumedParamType>>>);
             let mut swappable_temp: VecDeque<Box<HeapDataCell>> = unsafe { transmute(transmuted) };
             std::mem::swap(&mut swappable_temp, &mut self.input_queue);
             // Swap->Transmute->Mutate->Transmute->Swap ends
@@ -67,35 +68,34 @@ impl InputManager {
             std::mem::swap(&mut swappable_temp, &mut self.input_queue);
             // Swap->Transmute->Mutate->Transmute->Swap ends
 
-            self.notify_change_to_host();
+            self.notify_work();
 
             Ok(result)
         }
     }
 
-    pub(crate) fn notify_change_to_host(&self) {
+    pub(crate) fn notify_work(&self) {
         if let Some(work_item_sender) = &self.work_item_notifier {
-            work_item_sender.notify(WorkItemKind::Step);
+            work_item_sender.notify(WorkItemKind::StepIssued, true);
         }
     }
 
     pub(crate) fn push(&mut self, data: Box<HeapDataCell>) -> () {
         self.input_queue.push_back(data);
-        self.notify_change_to_host();
+        self.notify_work();
     }
 
     pub(crate) fn push_many(&mut self, mut data: VecDeque<Box<HeapDataCell>>) -> () {
         self.input_queue.append(&mut data);
-        self.notify_change_to_host();
+        self.notify_work();
     }
 }
 
-// TODO: explain why bridges, what does it serve
-pub struct InputManagerBridge<'a> {
+pub struct InputBridge<'a> {
     pub(crate) input_manager: &'a mut InputManager,
 }
 
-impl<'a> InputManagerBridge<'a> {
+impl<'a> InputBridge<'a> {
     pub fn peek<AssumedParamType: 'static, ReturnType>(
         &mut self,
         peek_fn: InputPeekFn<AssumedParamType, ReturnType>,
@@ -119,8 +119,16 @@ impl<'a> InputManagerBridge<'a> {
     }
 }
 
-impl<'a> From<&'a mut InputManager> for InputManagerBridge<'a> {
-    fn from(input_manager: &'a mut InputManager) -> Self {
-        InputManagerBridge { input_manager }
+impl<'a> Into<InputBridge<'a>> for &'a mut InputManager {
+    fn into(self) -> InputBridge<'a> {
+        InputBridge {
+            input_manager: self,
+        }
     }
 }
+
+// impl<'a> From<&'a mut InputManager> for InputManagerBridge<'a> {
+//     fn from(input_manager: &'a mut InputManager) -> Self {
+//         InputManagerBridge { input_manager }
+//     }
+// }

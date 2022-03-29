@@ -1,5 +1,6 @@
 use crate::{
-    node_seed::NodeSeed, typedef::NodeCell, NodeHashKey, WorkItem, WorkItemKind, WorkItemSource,
+    node_seed::NodeSeed, typedef::NodeCell, worker::Worker, NodeHashKey, WorkItem, WorkItemKind,
+    WorkItemSource,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -58,7 +59,8 @@ impl NodeHost {
         if let Some(work) = self.work_queue.pop_front() {
             match work {
                 WorkItem {
-                    kind: WorkItemKind::Step,
+                    priority: _,
+                    kind: WorkItemKind::StepIssued,
                     source: WorkItemSource::Node(node),
                 } => {
                     // Ignore nodes that have been destroyed
@@ -119,38 +121,61 @@ impl NodeHost {
                     }
                 }
                 WorkItem {
-                    kind: WorkItemKind::Effect,
+                    priority: _,
+                    kind: WorkItemKind::StepIssued,
+                    source: WorkItemSource::Worker(_node, worker),
+                } => {
+                    let worker = worker.borrow_mut();
+                    match worker.run_step() {
+                        Ok(x) => {}
+                        Err(x) => {
+                            // Handle runtime error
+                        }
+                    }
+                }
+                WorkItem {
+                    priority: _,
+                    kind: WorkItemKind::EffectAvailable,
+                    source: WorkItemSource::Worker(_node, worker),
+                } => {
+                    let worker = worker.borrow_mut();
+                    match worker.run_effect() {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    }
+                }
+                WorkItem {
+                    priority: _,
+                    kind: WorkItemKind::EffectAvailable,
                     source: WorkItemSource::Node(node),
                 } => {
                     // DO NOTHING
+                    // Currently Effect does not trigger anything in Node
                 }
                 WorkItem {
-                    kind: WorkItemKind::Step,
-                    source: WorkItemSource::Worker(node, worker),
+                    priority: _,
+                    kind: WorkItemKind::EffectExecuted,
+                    source: WorkItemSource::Worker(node, _),
                 } => {
-                    let worker = worker.borrow_mut();
-                    match worker.run() {
-                        Ok(x) => {}
-                        Err(x) => {}
-                    }
-                }
-                WorkItem {
-                    kind: WorkItemKind::Effect,
-                    source: WorkItemSource::Worker(node, worker),
-                } => {
-                    let worker = worker.borrow_mut();
-                    let effect_manager = &worker.effect_manager;
-                    let effect_manager_write_lock = effect_manager.write();
-                    match effect_manager_write_lock {
-                        Ok(mut effect) => {
-                            effect.run_all();
-                        }
+                    let sender = &self.work_channels.0;
+                    match sender.send(WorkItem {
+                        priority: false,
+                        kind: WorkItemKind::StepIssued,
+                        source: WorkItemSource::from(&node),
+                    }) {
+                        Ok(_) => {}
                         Err(_) => {
-                            // TODO:
+                            // Handle error
                         }
                     }
-                    // run effects
-                    // notify node
+                }
+                WorkItem {
+                    priority: _,
+                    kind: WorkItemKind::EffectExecuted,
+                    source: WorkItemSource::Node(node),
+                } => {
+                    // DO NOTHING
+                    // Currently Effect does not trigger anything in Node
                 }
             }
             true
@@ -181,22 +206,3 @@ impl NodeHost {
         self.child_map.remove(key);
     }
 }
-
-// Initialize
-
-// 1. Create Node and bind to Root
-// 2. Run host worker
-
-// Host Worker
-
-// 1. For each node, recursively from root, create_patch
-// 2. Run patch (which will queue more patches)
-// 3. Repeat
-
-// Run Patch
-// 1. Read dependencies (props, Context (implemented later))
-// 2. (Optional) queue for more patches
-// 3. Determine and prune children
-
-// Children Determination, memoiozation?
-// 1. pikir nanti

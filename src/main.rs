@@ -6,11 +6,25 @@ use machinetree_backend::{
 };
 use std::cell::RefCell;
 
+// struct TreeWorkerHostExample {}
+
+// impl TreeWorkerHostExample {
+//     pub fn create_seed(input: u8) -> NodeSeed {
+//         let type_id = std::any::TypeId::of::<Self>();
+
+//         let generate_workers: Box<dyn FnOnce() -> HashMap<String, Rc<RefCell<Worker>>>> =
+//             Box::new(|| {
+//                 let hash_map = Default::default();
+//                 hash_map
+//             });
+//     }
+// }
+
 struct TreeExampleConstructor {}
 
 impl TreeExampleConstructor {
     pub fn create_seed(input: u8, key: Option<String>) -> NodeSeed {
-        let type_id = std::any::TypeId::of::<TreeExampleConstructor>();
+        let type_id = std::any::TypeId::of::<Self>();
 
         let generate_step_fn: Box<dyn Fn() -> Box<NodeStepFn>> = Box::new(|| {
             // TODO: consider if step_fn should return Result<_, RuntimeError>
@@ -57,7 +71,7 @@ impl TreeExampleConstructor {
 
         let param: Box<HeapDataCell> = Box::new(RefCell::new(Box::new(input)));
 
-        NodeSeed::create(type_id, key, param, generate_step_fn)
+        NodeSeed::create(type_id, key, param, None, generate_step_fn)
     }
 }
 
