@@ -1,15 +1,17 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
     sync::{Arc, RwLock},
 };
 
 use crate::{
     embeddable::{
-        effect_manager::{EffectExecutionBridge, EffectManager, EffectBridge},
-        input_manager::{InputManager, InputBridge},
-        state_manager::{StateManager, StateBridge},
+        effect_manager::{EffectBridge, EffectManager, EffectOperationBridge},
+        input_manager::{InputBridge, InputManager},
+        state_manager::{StateBridge, StateManager},
     },
-    typedef::{RuntimeError, WorkerStepFn},
+    typedef::{RuntimeError, WorkerCell, WorkerCellRc, WorkerMap, WorkerSeedMap, WorkerStepFn},
 };
 
 pub struct WorkerOperationBridge<'a> {
@@ -31,12 +33,34 @@ impl<'a> WorkerOperationBridge<'a> {
         }
     }
 }
+
+pub struct WorkerSeed {
+    pub step_fn: Box<WorkerStepFn>,
+}
+
+impl Into<Worker> for WorkerSeed {
+    fn into(self) -> Worker {
+        Worker {
+            input_manager: Default::default(),
+            state_manager: Default::default(),
+            effect_manager: Default::default(),
+            step_fn: self.step_fn,
+        }
+    }
+}
+
 pub struct Worker {
     pub(crate) input_manager: RefCell<InputManager>,
     pub(crate) state_manager: RefCell<StateManager>,
     pub(crate) effect_manager: Arc<RwLock<EffectManager>>,
     pub(crate) step_fn: Box<WorkerStepFn>,
-    pub(crate) destroy_fn: Box<WorkerStepFn>,
+    // pub(crate) destroy_fn: Box<WorkerStepFn>,
+}
+
+impl Into<WorkerCellRc> for Worker {
+    fn into(self) -> WorkerCellRc {
+        Rc::new(RefCell::new(self))
+    }
 }
 
 impl Worker {
@@ -90,7 +114,7 @@ impl Worker {
         match effect_manager_write_lock {
             Ok(mut effect_ref) => {
                 let mut effect_execution_bridge =
-                    EffectExecutionBridge::new(&mut input_ref, &mut state_ref);
+                    EffectOperationBridge::new(&mut input_ref, &mut state_ref);
                 effect_ref.run_all(&mut effect_execution_bridge);
                 Ok(())
             }

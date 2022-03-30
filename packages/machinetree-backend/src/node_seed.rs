@@ -2,8 +2,8 @@ use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     node::Node,
-    typedef::{HeapDataCell, NodeCell, NodeStepFn},
-    worker::Worker,
+    typedef::{HeapDataCell, NodeCell, NodeStepFn, WorkerCellRc, WorkerMap},
+    worker::{Worker, WorkerSeed},
     WorkItem, WorkItemNotifier, WorkItemSource,
 };
 
@@ -20,8 +20,8 @@ pub struct NodeSeed {
     pub(crate) type_id: TypeId,
     pub(crate) key: Option<String>,
     pub(crate) input: Box<HeapDataCell>,
-    pub(crate) generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, Rc<RefCell<Worker>>>>>,
-    pub(crate) generate_step_fn: Box<dyn Fn() -> Box<NodeStepFn>>,
+    pub(crate) generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, WorkerSeed>>>,
+    pub(crate) step_fn: Box<NodeStepFn>,
 }
 
 impl NodeSeed {
@@ -29,15 +29,15 @@ impl NodeSeed {
         type_id: TypeId,
         key: Option<String>,
         input: Box<HeapDataCell>,
-        generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, Rc<RefCell<Worker>>>>>,
-        generate_step_fn: Box<dyn Fn() -> Box<NodeStepFn>>,
+        generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, WorkerSeed>>>,
+        step_fn: Box<NodeStepFn>,
     ) -> Self {
         Self {
             type_id,
             key,
             input,
             generate_workers,
-            generate_step_fn,
+            step_fn,
         }
     }
 
@@ -62,7 +62,7 @@ impl NodeSeed {
             key,
             input,
             generate_workers,
-            generate_step_fn,
+            step_fn,
         }: NodeSeed = seed;
 
         let node_rc = Rc::new(RefCell::new(Node {
@@ -72,7 +72,7 @@ impl NodeSeed {
             input_manager: Default::default(),
             effect_manager: Default::default(),
             workers: Default::default(),
-            step_fn: generate_step_fn(),
+            step_fn,
         }));
 
         {
@@ -106,7 +106,16 @@ impl NodeSeed {
                 };
 
                 if let Some(new_workers) = new_workers {
-                    node.workers = RefCell::new(new_workers);
+                    let worker_map: WorkerMap = new_workers
+                        .into_iter()
+                        .map(|x| {
+                            (x.0, {
+                                let worker: Worker = x.1.into();
+                                worker.into()
+                            })
+                        })
+                        .collect();
+                    node.workers = RefCell::new(worker_map);
                 }
             }
             // IMPORTANT: must be done after patch_manager.on_mutate_listener is installed

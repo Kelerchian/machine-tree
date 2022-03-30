@@ -2,81 +2,101 @@ use machinetree_backend::{
     self,
     node_host::NodeHost,
     node_seed::NodeSeed,
-    typedef::{HeapDataCell, NodeStepFn},
+    typedef::{HeapDataCell, NodeStepFn, WorkerSeedMap},
+    worker::{Worker, WorkerSeed},
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-// struct TreeWorkerHostExample {}
+struct TreeWorkerHostExample {}
 
-// impl TreeWorkerHostExample {
-//     pub fn create_seed(input: u8) -> NodeSeed {
-//         let type_id = std::any::TypeId::of::<Self>();
+impl TreeWorkerHostExample {
+    pub fn create_seed() -> NodeSeed {
+        let type_id = std::any::TypeId::of::<Self>();
 
-//         let generate_workers: Box<dyn FnOnce() -> HashMap<String, Rc<RefCell<Worker>>>> =
-//             Box::new(|| {
-//                 let hash_map = Default::default();
-//                 hash_map
-//             });
-//     }
-// }
+        let generate_workers: Box<dyn FnOnce() -> WorkerSeedMap> = Box::new(|| {
+            let mut map: WorkerSeedMap = Default::default();
+            // TODO: Worker seed
+            map.insert(
+                "1".into(),
+                WorkerSeed {
+                    step_fn: Box::new(|worker_operation_bridge| {}),
+                },
+            );
+            map
+        });
+
+        let step_fn: Box<NodeStepFn> = Box::new(|bridge| vec![]);
+
+        NodeSeed::create(
+            type_id,
+            None,
+            Box::new(RefCell::new(Box::new(()))),
+            Some(generate_workers),
+            step_fn,
+        )
+    }
+}
 
 struct TreeExampleConstructor {}
 
 impl TreeExampleConstructor {
     pub fn create_seed(input: u8, key: Option<String>) -> NodeSeed {
         let type_id = std::any::TypeId::of::<Self>();
+        let param: Box<HeapDataCell> = Box::new(RefCell::new(Box::new(input)));
+        let step_fn: Box<NodeStepFn> = Box::new(|bridge| {
+            let input_res =
+                bridge
+                    .input
+                    .peek::<u8, Option<u8>>(Box::new(|input_queue| -> Option<u8> {
+                        let input_front = input_queue.front();
+                        let input_res = match input_front {
+                            Some(x) => {
+                                let x = x.borrow();
+                                let x = (**x).clone();
+                                Some(x)
+                            }
+                            None => None,
+                        };
+                        input_res
+                    }));
 
-        let generate_step_fn: Box<dyn Fn() -> Box<NodeStepFn>> = Box::new(|| {
-            // TODO: consider if step_fn should return Result<_, RuntimeError>
-            // Emphasis on the RuntimeError
-            let step_fn: Box<NodeStepFn> = Box::new(|bridge| {
-                // TODO: macroify the ReturnType
-                let input_res =
-                    bridge
-                        .input
-                        .peek::<u8, Option<u8>>(Box::new(|input_queue| -> Option<u8> {
-                            let input_front = input_queue.front();
-                            let input_res = match input_front {
-                                Some(x) => {
-                                    let x = x.borrow();
-                                    let x = (**x).clone();
-                                    Some(x)
-                                }
-                                None => None,
-                            };
-                            input_res
-                        }));
+            let count: u8 = match input_res {
+                Ok(x) => match x {
+                    Some(x) => x,
+                    None => 0u8,
+                },
+                Err(_) => 0u8,
+            };
+            println!("key: {:?} count: {}", bridge.key, count);
 
-                let count: u8 = match input_res {
-                    Ok(x) => match x {
-                        Some(x) => x,
-                        None => 0u8,
-                    },
-                    Err(_) => 0u8,
-                };
-
-                let mut seeds = vec![];
-
-                for x in 0..count {
-                    seeds.push(TreeExampleConstructor::create_seed(
-                        count - 1,
-                        Some(String::from(format!("{}-{}", count, x))),
-                    ));
-                }
-
-                seeds
-            });
-            step_fn
+            if count > 0 {
+                (0..=1)
+                    .into_iter()
+                    .map(|x| {
+                        TreeExampleConstructor::create_seed(
+                            count - 1,
+                            Some(String::from(format!(
+                                "{}{}",
+                                match bridge.key {
+                                    Some(x) => format!("{}-", x),
+                                    None => String::from(""),
+                                },
+                                x
+                            ))),
+                        )
+                    })
+                    .collect()
+            } else {
+                vec![]
+            }
         });
 
-        let param: Box<HeapDataCell> = Box::new(RefCell::new(Box::new(input)));
-
-        NodeSeed::create(type_id, key, param, None, generate_step_fn)
+        NodeSeed::create(type_id, key.clone(), param, None, step_fn)
     }
 }
 
 fn main() {
-    let mut host = NodeHost::create_root(TreeExampleConstructor::create_seed(4, None));
+    let mut host = NodeHost::create_root(TreeExampleConstructor::create_seed(3, None));
     loop {
         let host = &mut host;
         if let Err(error) = host.receive_work() {

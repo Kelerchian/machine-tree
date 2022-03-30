@@ -6,14 +6,14 @@ use super::{
     state_manager::{StateBridge, StateManager},
 };
 
-pub struct EffectExecutionBridge<'a> {
+pub struct EffectOperationBridge<'a> {
     state: StateBridge<'a>,
     input: InputBridge<'a>,
 }
 
-impl<'a> EffectExecutionBridge<'a> {
+impl<'a> EffectOperationBridge<'a> {
     pub(crate) fn new(input: &'a mut InputManager, state: &'a mut StateManager) -> Self {
-        EffectExecutionBridge {
+        EffectOperationBridge {
             input: input.into(),
             state: state.into(),
         }
@@ -32,7 +32,7 @@ impl EffectManager {
         self.next.push_back(effect);
     }
 
-    pub(crate) fn run_all(&mut self, effect_bridge: &mut EffectExecutionBridge) {
+    pub(crate) fn run_all(&mut self, effect_bridge: &mut EffectOperationBridge) {
         let mut is_executed_at_least_once = false;
         while let Some(effect) = self.current.pop_front() {
             effect(effect_bridge);

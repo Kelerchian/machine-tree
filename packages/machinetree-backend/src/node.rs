@@ -1,8 +1,8 @@
 use crate::{
     embeddable::{
-        effect_manager::{EffectManager, EffectBridge},
+        effect_manager::{EffectBridge, EffectManager},
         input_manager::{InputBridge, InputManager},
-        state_manager::{StateManager, StateBridge},
+        state_manager::{StateBridge, StateManager},
     },
     node_seed::NodeSeed,
     typedef::{HeapDataCell, NodeStepFn, RuntimeError},
@@ -46,7 +46,7 @@ impl Node {
     //         Err(_poison_error) => {
     //             // TODO: tell the host there's a poison error
     //         }
-    //     }    
+    //     }
     // }
 
     pub fn run<'a>(&'a mut self) -> Result<Vec<NodeSeed>, RuntimeError> {
@@ -59,6 +59,7 @@ impl Node {
         match effect_manager_write_lock {
             Ok(mut effect_manager_mut_ref) => {
                 let mut operation_bridge = NodeOperationBridge::new(
+                    &self.key,
                     &mut input_manager_mut_ref,
                     &mut state_manager_mut_ref,
                     &mut effect_manager_mut_ref,
@@ -83,15 +84,18 @@ pub struct NodeOperationBridge<'a> {
     pub input: InputBridge<'a>,
     pub effect: EffectBridge<'a>,
     pub state: StateBridge<'a>,
+    pub key: &'a Option<String>,
 }
 
 impl<'a> NodeOperationBridge<'a> {
     fn new(
+        key: &'a Option<String>,
         input: &'a mut InputManager,
         state: &'a mut StateManager,
         effect: &'a mut EffectManager,
     ) -> Self {
         Self {
+            key,
             input: input.into(),
             state: state.into(),
             effect: effect.into(),
