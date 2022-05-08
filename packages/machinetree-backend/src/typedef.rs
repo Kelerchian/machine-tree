@@ -27,10 +27,7 @@ pub type WorkerSeedMap = HashMap<String, WorkerSeed>;
 pub(crate) type Effect = Box<dyn FnOnce(&mut EffectOperationBridge) -> ()>;
 
 pub type PeekFn<AssumedHeapdataType, ReturnType> = Box<dyn Fn(&AssumedHeapdataType) -> ReturnType>;
-// Box<dyn Fn(&VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
-
 pub type MutateFn<AssumedHeapdataType, ReturnType> =
     Box<dyn Fn(&mut AssumedHeapdataType) -> ReturnType>;
-// Box<dyn Fn(&mut VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>) -> ReturnType>;
 
 pub struct RuntimeError;

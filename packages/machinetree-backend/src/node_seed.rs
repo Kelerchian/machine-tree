@@ -1,6 +1,7 @@
 use std::{any::TypeId, cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
+    embeddable::input_manager::InputManager,
     node::Node,
     typedef::{HeapDataCell, NodeCell, NodeStepFn, WorkerCellRc, WorkerMap},
     worker::{Worker, WorkerSeed},
@@ -19,7 +20,7 @@ pub struct NodeSeed {
      */
     pub(crate) type_id: TypeId,
     pub(crate) key: Option<String>,
-    pub(crate) input: Box<HeapDataCell>,
+    pub(crate) input: HeapDataCell,
     pub(crate) generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, WorkerSeed>>>,
     pub(crate) step_fn: Box<NodeStepFn>,
 }
@@ -28,7 +29,7 @@ impl NodeSeed {
     pub fn create(
         type_id: TypeId,
         key: Option<String>,
-        input: Box<HeapDataCell>,
+        input: HeapDataCell,
         generate_workers: Option<Box<dyn FnOnce() -> HashMap<String, WorkerSeed>>>,
         step_fn: Box<NodeStepFn>,
     ) -> Self {
@@ -69,7 +70,7 @@ impl NodeSeed {
             type_id,
             key: key.clone(),
             state_manager: Default::default(),
-            input_manager: Default::default(),
+            input_manager: RefCell::new(InputManager::new(input)),
             effect_manager: Default::default(),
             workers: Default::default(),
             step_fn,
@@ -93,6 +94,8 @@ impl NodeSeed {
                         WorkItemSource::from(&node_rc),
                         &sender,
                     ));
+                // Must be done to run first step
+                input_manager.notify_work();
             }
 
             // Worker assignment
@@ -118,8 +121,6 @@ impl NodeSeed {
                     node.workers = RefCell::new(worker_map);
                 }
             }
-            // IMPORTANT: must be done after patch_manager.on_mutate_listener is installed
-            node.consume_input(input);
 
             // TODO: error handling for "else" block
             // which is a never scenario

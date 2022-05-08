@@ -74,9 +74,9 @@ impl Node {
         }
     }
 
-    pub fn consume_input(&self, input: Box<HeapDataCell>) {
+    pub fn consume_input(&self, input: HeapDataCell) {
         let mut input_manager = self.input_manager.borrow_mut();
-        input_manager.push(input);
+        input_manager.set(input);
     }
 }
 // TODO: explain capabilities

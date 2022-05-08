@@ -1,93 +1,45 @@
+use std::cell::RefCell;
+
 use crate::{
-    typedef::{HeapDataCell, MutateFn, PeekFn, RuntimeError, TypedHeapDataCell},
+    typedef::{HeapData, HeapDataCell, PeekFn, RuntimeError},
     WorkItemKind, WorkItemNotifier,
 };
-use std::{collections::VecDeque, intrinsics::transmute};
 
-#[derive(Default)]
 pub struct InputManager {
+    pub(crate) data: HeapDataCell,
     pub(crate) work_item_notifier: Option<WorkItemNotifier>,
-    pub(crate) input_queue: VecDeque<Box<HeapDataCell>>,
 }
 
-pub type InputPeekFn<AssumedHeapdataType, ReturnType> =
-    PeekFn<VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>, ReturnType>;
-pub type InputMutateFn<AssumedHeapdataType, ReturnType> =
-    MutateFn<VecDeque<Box<TypedHeapDataCell<AssumedHeapdataType>>>, ReturnType>;
-
+pub type InputPeekFn<AssumedHeapdataType, ReturnType> = PeekFn<AssumedHeapdataType, ReturnType>;
 impl InputManager {
-    fn validate_payload_type<AssumedType: 'static>(&self) -> VecDeque<RuntimeError> {
-        let mut errs: VecDeque<RuntimeError> = Default::default();
-
-        self.input_queue.iter().for_each(|boxed_refcell| {
-            let borrowed = boxed_refcell.as_ref().borrow();
-            if let None = borrowed.as_ref().downcast_ref::<AssumedType>() {
-                errs.push_back(RuntimeError);
-            }
-        });
-
-        errs
+    pub(crate) fn new(data: HeapDataCell) -> InputManager {
+        let new_input = InputManager {
+            data,
+            work_item_notifier: None,
+        };
+        new_input
     }
 
     pub(crate) fn peek<AssumedParamType: 'static, ReturnType>(
-        &mut self,
+        &self,
         peek_fn: InputPeekFn<AssumedParamType, ReturnType>,
     ) -> Result<ReturnType, RuntimeError> {
-        if self.validate_payload_type::<AssumedParamType>().len() > 0 {
-            Err(RuntimeError)
-        } else {
-            // Swap->Transmute->Mutate->Transmute->Swap starts
-            let mut swappable_temp = Default::default();
-            std::mem::swap(&mut swappable_temp, &mut self.input_queue);
-            let transmuted: VecDeque<Box<TypedHeapDataCell<AssumedParamType>>> =
-                unsafe { transmute(swappable_temp) };
-            let result =
-                peek_fn(&transmuted as &VecDeque<Box<TypedHeapDataCell<AssumedParamType>>>);
-            let mut swappable_temp: VecDeque<Box<HeapDataCell>> = unsafe { transmute(transmuted) };
-            std::mem::swap(&mut swappable_temp, &mut self.input_queue);
-            // Swap->Transmute->Mutate->Transmute->Swap ends
-
-            Ok(result)
+        let input = self.data.borrow();
+        match input.downcast_ref::<AssumedParamType>() {
+            Some(x) => Ok(peek_fn(x)),
+            None => Err(RuntimeError),
         }
     }
 
-    pub(crate) fn mutate<AssumedParamType: 'static, ReturnType>(
-        &mut self,
-        mutate_fn: InputMutateFn<AssumedParamType, ReturnType>,
-    ) -> Result<ReturnType, RuntimeError> {
-        if self.validate_payload_type::<AssumedParamType>().len() > 0 {
-            Err(RuntimeError)
-        } else {
-            // Swap->Transmute->Mutate->Transmute->Swap starts
-            let mut swappable_temp = Default::default();
-            std::mem::swap(&mut swappable_temp, &mut self.input_queue);
-            let mut transmuted: VecDeque<Box<TypedHeapDataCell<AssumedParamType>>> =
-                unsafe { transmute(swappable_temp) };
-            let result = mutate_fn(&mut transmuted);
-            let mut swappable_temp: VecDeque<Box<HeapDataCell>> = unsafe { transmute(transmuted) };
-            std::mem::swap(&mut swappable_temp, &mut self.input_queue);
-            // Swap->Transmute->Mutate->Transmute->Swap ends
-
-            self.notify_work();
-
-            Ok(result)
-        }
+    pub(crate) fn set(&mut self, data: HeapDataCell) {
+        self.data = data;
+        self.notify_work();
     }
 
     pub(crate) fn notify_work(&self) {
         if let Some(work_item_sender) = &self.work_item_notifier {
             work_item_sender.notify(WorkItemKind::StepIssued, true);
         }
-    }
-
-    pub(crate) fn push(&mut self, data: Box<HeapDataCell>) -> () {
-        self.input_queue.push_back(data);
-        self.notify_work();
-    }
-
-    pub(crate) fn push_many(&mut self, mut data: VecDeque<Box<HeapDataCell>>) -> () {
-        self.input_queue.append(&mut data);
-        self.notify_work();
     }
 }
 
@@ -101,21 +53,6 @@ impl<'a> InputBridge<'a> {
         peek_fn: InputPeekFn<AssumedParamType, ReturnType>,
     ) -> Result<ReturnType, RuntimeError> {
         self.input_manager.peek(peek_fn)
-    }
-
-    pub fn mutate<AssumedParamType: 'static, ReturnType>(
-        &mut self,
-        mutate_fn: InputMutateFn<AssumedParamType, ReturnType>,
-    ) -> Result<ReturnType, RuntimeError> {
-        self.input_manager.mutate(mutate_fn)
-    }
-
-    pub fn push(&mut self, data: Box<HeapDataCell>) -> () {
-        self.input_manager.input_queue.push_back(data);
-    }
-
-    pub fn push_many(&mut self, mut data: VecDeque<Box<HeapDataCell>>) -> () {
-        self.input_manager.input_queue.append(&mut data);
     }
 }
 

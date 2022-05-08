@@ -8,13 +8,13 @@ use super::{
 
 pub struct EffectOperationBridge<'a> {
     state: StateBridge<'a>,
-    input: InputBridge<'a>,
+    // input: InputBridge<'a>,
 }
 
 impl<'a> EffectOperationBridge<'a> {
-    pub(crate) fn new(input: &'a mut InputManager, state: &'a mut StateManager) -> Self {
+    pub(crate) fn new(state: &'a mut StateManager) -> Self {
         EffectOperationBridge {
-            input: input.into(),
+            // input: input.into(),
             state: state.into(),
         }
     }
