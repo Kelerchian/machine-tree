@@ -16,6 +16,10 @@ Examples:
 - Multi-step 
 - etc
 
+## How it works
+
+![How it Works!](./howitworks.jpg "How It Works")
+
 ## Status
 
 - Does it work? Sort of.
