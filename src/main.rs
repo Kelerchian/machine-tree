@@ -1,97 +1,76 @@
-use machinetree_backend::{
-    self,
-    node::NodeOperationBridge,
-    node_host::NodeHost,
-    node_seed::NodeSeed,
-    typedef::{HeapDataCell, NodeStepFn, WorkerSeedMap},
-    worker::{Worker, WorkerSeed},
-};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::time::Duration;
 
-struct TreeWorkerHostExample {}
+use machinetree_backend::{self, node::Component, node::StepFn, node_host::NodeHost};
 
-impl TreeWorkerHostExample {
-    pub fn create_seed() -> NodeSeed {
-        let type_id = std::any::TypeId::of::<Self>();
+struct ExampleComponent;
 
-        let generate_workers: Box<dyn FnOnce() -> WorkerSeedMap> = Box::new(|| {
-            let mut map: WorkerSeedMap = Default::default();
-            // TODO: Worker seed
-            map.insert(
-                "1".into(),
-                WorkerSeed {
-                    step_fn: Box::new(|worker_operation_bridge| {}),
-                },
-            );
-            map
-        });
-
-        let step_fn: Box<NodeStepFn> = Box::new(|bridge| vec![]);
-
-        NodeSeed::create(
-            type_id,
-            None,
-            RefCell::new(Box::new(())),
-            Some(generate_workers),
-            step_fn,
-        )
-    }
+#[derive(Clone)]
+struct Param {
+    parent_index_chain: String,
+    self_index: u32,
+    parent_child_count: u32,
 }
 
-struct TreeExampleConstructor {}
+impl Component for ExampleComponent {
+    type Input = Param;
 
-impl TreeExampleConstructor {
-    pub fn step(bridge: &mut NodeOperationBridge) -> Vec<NodeSeed> {
-        let count_res = bridge
-            .input
-            .peek::<u8, u8>(Box::new(|input_queue| -> u8 { input_queue.clone() }));
+    fn construct() -> StepFn<Self::Input> {
+        // define state
+        let mut child_count_opt = None;
 
-        let count = match count_res {
-            Ok(x) => x,
-            Err(_) => 0,
-        };
+        // step_fn
+        Box::new(move |control, param| {
+            let self_index = param.self_index;
+            let initial_child_count = param.parent_child_count;
+            let parent_index_chain = &param.parent_index_chain;
+            let self_index_chain = format!("{parent_index_chain}/{self_index}");
 
-        println!("key: {:?} count: {}", bridge.key, &count);
+            match child_count_opt {
+                None => {
+                    child_count_opt = Some(initial_child_count);
+                    control.rerender();
+                    println!("{self_index_chain}: initializing");
+                    Default::default()
+                }
+                Some(child_count) => {
+                    if child_count > 0 {
+                        child_count_opt = Some(child_count - 1);
+                        control.rerender();
+                    }
 
-        if count > 0 {
-            (0..=1)
-                .into_iter()
-                .map(|x| {
-                    TreeExampleConstructor::create_seed(
-                        count - 1,
-                        Some(String::from(format!(
-                            "{}{}",
-                            match bridge.key {
-                                Some(x) => format!("{}-", x),
-                                None => String::from(""),
-                            },
-                            x
-                        ))),
-                    )
-                })
-                .collect()
-        } else {
-            vec![]
-        }
-    }
-
-    pub fn create_seed(input: u8, key: Option<String>) -> NodeSeed {
-        let type_id = std::any::TypeId::of::<Self>();
-        let param: HeapDataCell = RefCell::new(Box::new(input));
-        let step_fn: Box<NodeStepFn> = Box::new(|bridge| Self::step(bridge));
-        NodeSeed::create(type_id, key.clone(), param, None, step_fn)
+                    println!("{self_index_chain}");
+                    (0..child_count)
+                        .into_iter()
+                        .map(|index| {
+                            Self::seed(
+                                Param {
+                                    self_index: index,
+                                    parent_child_count: child_count - 1,
+                                    parent_index_chain: self_index_chain.clone(),
+                                },
+                                format!("{self_index_chain}/{index}"),
+                            )
+                        })
+                        .collect()
+                }
+            }
+        })
     }
 }
 
 fn main() {
-    let mut host = NodeHost::create_root(TreeExampleConstructor::create_seed(3, None));
-    loop {
-        let host = &mut host;
-        if let Err(error) = host.receive_work() {
-            if error == crossbeam::channel::TryRecvError::Empty {
-                break;
-            }
-        }
-        host.run_work();
+    let mut host = NodeHost::create_with_root(ExampleComponent::seed(
+        Param {
+            parent_index_chain: String::from("root"),
+            self_index: 0,
+            parent_child_count: 3,
+        },
+        format!(""),
+    ));
+    let mut i = 0;
+    while host.step().render_count > 0 {
+        println!("===end-of-iteration:{i}");
+        std::thread::sleep(Duration::from_millis(10));
+        i += 1;
     }
 }

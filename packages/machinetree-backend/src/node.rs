@@ -1,127 +1,115 @@
-use crate::{
-    embeddable::{
-        effect_manager::{EffectBridge, EffectManager},
-        input_manager::{InputBridge, InputManager},
-        state_manager::{StateBridge, StateManager},
-    },
-    node_seed::NodeSeed,
-    typedef::{HeapDataCell, NodeStepFn, RuntimeError},
-    worker::Worker,
-};
 use std::{
-    any::TypeId,
+    any::{Any, TypeId},
     cell::RefCell,
-    collections::HashMap,
     rc::Rc,
-    sync::{Arc, RwLock},
 };
 
-/*
- * Node should work like pipe:
- * Triggers are:
- * 1. Param push
- * 2. Worker notification
- */
+pub trait Control {
+    fn rerender(&mut self) -> ();
+}
 
+pub trait Component
+where
+    Self: Sized + 'static,
+{
+    type Input: Sized + Clone + 'static;
+
+    fn construct() -> StepFn<Self::Input>;
+
+    fn inherit_input(node: &Node) -> AbstractizedInputBox
+    where
+        Self: Sized,
+    {
+        Box::new(Self::get_input_box_ref(&node.input).clone())
+    }
+
+    fn create_inherit_input_fn_box() -> InheritInputFnBox
+    where
+        Self: Sized,
+    {
+        Box::new(Self::inherit_input)
+    }
+
+    fn get_input_box_ref<'a>(input: &'a AbstractizedInputBox) -> &'a Self::Input {
+        input.downcast_ref::<Self::Input>().unwrap()
+    }
+
+    fn construct_abstract() -> AbstractizedStepFn {
+        // Reverse Box<dyn Any>
+        // to Box<RefCell<Box<dyn FnMut(Self::Input) -> Vec<NodeSeed>>>>
+
+        let mut step_fn = Self::construct();
+        Box::new(
+            move |control: &mut dyn Control, input: &AbstractizedInputBox| {
+                step_fn(control, &Self::get_input_box_ref(input))
+            },
+        )
+    }
+
+    fn seed(input: Self::Input, key: String) -> Node {
+        let type_id = TypeId::of::<Self>();
+        let step_fn: AbstractizedStepFnBrc = Box::new(RefCell::new(Self::construct_abstract()));
+        let input: AbstractizedInputBox = Box::new(input);
+        let inherit_input_fn_box: InheritInputFnBox = Box::new(Self::inherit_input);
+        Node {
+            type_id,
+            key,
+            input,
+            inherit_input_fn_box,
+            step_fn,
+        }
+    }
+}
+
+pub struct ExampleNodeFac;
+impl Component for ExampleNodeFac {
+    type Input = u32;
+
+    fn construct() -> StepFn<Self::Input> {
+        Box::new(|_, _| vec![])
+    }
+}
+
+/**
+ * Used to create a new Node or append param into a Node
+ */
 pub struct Node {
     /**
-     * Used to match with NodeSeed
+     * Used to match with Node.
+     * If a NodeSeed's type_id matches Node's type_id,
+     * instead of creating a new Node
+     * It appends the param into the Node's param
      */
     pub(crate) type_id: TypeId,
-    pub(crate) key: Option<String>,
-    pub(crate) input_manager: RefCell<InputManager>,
-    pub(crate) state_manager: RefCell<StateManager>,
-    pub(crate) effect_manager: Arc<RwLock<EffectManager>>,
-    pub(crate) workers: RefCell<HashMap<String, Rc<RefCell<Worker>>>>,
-    pub(crate) step_fn: Box<NodeStepFn>,
+    pub(crate) key: String,
+    pub(crate) input: AbstractizedInputBox,
+    pub(crate) inherit_input_fn_box: InheritInputFnBox,
+    pub(crate) step_fn: AbstractizedStepFnBrc,
 }
+
+// TODO: make StepFn more accomodating toward Self Struct, and not relying on FnMut
+pub type StepFn<Input> = Box<dyn FnMut(&mut dyn Control, &Input) -> Vec<Node>>;
+pub(crate) type InputBox<Input> = Box<Input>;
+pub(crate) type AbstractizedInputBox = InputBox<dyn Any>;
+pub(crate) type InheritInputFn = fn(&Node) -> AbstractizedInputBox;
+pub(crate) type InheritInputFnBox = Box<InheritInputFn>;
+pub(crate) type AbstractizedStepFn = StepFn<AbstractizedInputBox>;
+pub(crate) type AbstractizedStepFnBrc = Box<RefCell<AbstractizedStepFn>>;
+pub(crate) type NodeC = RefCell<Node>;
+pub(crate) type NodeRcc = Rc<NodeC>;
 
 impl Node {
-    // TODO: move logic to host
-    // pub fn swap_patches(&self) {
-    //     match self.effect_manager.write() {
-    //         Ok(mut effect_manager) => {
-    //             (*effect_manager).swap_patch();
-    //         }
-    //         Err(_poison_error) => {
-    //             // TODO: tell the host there's a poison error
-    //         }
-    //     }
-    // }
-
-    pub fn run<'a>(&'a mut self) -> Result<Vec<NodeSeed>, RuntimeError> {
-        // These codes are put in a bloc kto avoid borrowing param manager twice
-        let step_fn = &self.step_fn;
-        let mut input_manager_mut_ref = self.input_manager.borrow_mut();
-        let mut state_manager_mut_ref = self.state_manager.borrow_mut();
-        let effect_manager_write_lock = self.effect_manager.write();
-
-        match effect_manager_write_lock {
-            Ok(mut effect_manager_mut_ref) => {
-                let mut operation_bridge = NodeOperationBridge::new(
-                    &self.key,
-                    &mut input_manager_mut_ref,
-                    &mut state_manager_mut_ref,
-                    &mut effect_manager_mut_ref,
-                );
-                let seeds = step_fn(&mut operation_bridge);
-                Ok(seeds)
-            }
-            Err(_) => {
-                Err(RuntimeError)
-                // TODO: signal runtime error
-            }
-        }
+    pub(crate) fn equal_as_node_reference(node_a: &Node, node_b: &Node) -> bool {
+        node_a.type_id == node_b.type_id && node_a.key == node_b.key
     }
 
-    pub fn consume_input(&self, input: HeapDataCell) {
-        let mut input_manager = self.input_manager.borrow_mut();
-        input_manager.set(input);
+    pub fn inherit_input(&self) -> AbstractizedInputBox {
+        (&self.inherit_input_fn_box)(self)
     }
 }
-// TODO: explain capabilities
-pub struct NodeOperationBridge<'a> {
-    pub input: InputBridge<'a>,
-    pub effect: EffectBridge<'a>,
-    pub state: StateBridge<'a>,
-    pub key: &'a Option<String>,
-}
 
-impl<'a> NodeOperationBridge<'a> {
-    fn new(
-        key: &'a Option<String>,
-        input: &'a mut InputManager,
-        state: &'a mut StateManager,
-        effect: &'a mut EffectManager,
-    ) -> Self {
-        Self {
-            key,
-            input: input.into(),
-            state: state.into(),
-            effect: effect.into(),
-        }
+impl Into<NodeRcc> for Node {
+    fn into(self) -> NodeRcc {
+        Rc::new(RefCell::new(self))
     }
-
-    // TODO: provide a way to access worker
-    // fn use_worker<ReturnType>(
-    //     &'a self,
-    //     id: &String,
-    //     operation_fn: Box<dyn Fn(&mut WorkerOperationBridge) -> ReturnType>,
-    // ) -> Option<ReturnType> {
-    //     let workers = self.node.workers.borrow_mut();
-    //     if let Some(worker) = (workers).get(id) {
-    //         let return_value = {
-    //             let borrowed = (worker).borrow_mut();
-    //             let mut operation_bridge = WorkerOperationBridge::from(&*borrowed);
-    //             let return_value = operation_fn(&mut operation_bridge);
-
-    //             // TODO: signal to patch manager, or write it in worker.rs instead
-
-    //             return_value
-    //         };
-    //         Some(return_value)
-    //     } else {
-    //         None
-    //     }
-    // }
 }
