@@ -1,29 +1,42 @@
-mod storage;
+mod lake;
+use crate::embeddable::context_holder::ContextAccess;
 use crate::node::{Control, NodeRcc};
 use crate::{node::Node, WorkItem};
+use lake::NodeLake;
 use std::collections::{HashMap, VecDeque};
-use storage::NodeStorage;
 
 // TODO: convert to trait
 // Trait Host
 // User can implement custom host, but we provide a default host
 // 2 built-in host I am thinking about: Sync-blocky and Total-async
 
-pub struct NodeControl {
+pub struct NodeControl<'a> {
+    context_access: ContextAccess<'a>,
     rerender_flag: bool,
 }
-impl Control for NodeControl {
+
+impl<'a> Control<'a> for NodeControl<'a> {
     fn rerender(&mut self) -> () {
         self.rerender_flag = true;
     }
-}
 
-impl Default for NodeControl {
-    fn default() -> Self {
+    fn access_context<'f>(&'a mut self) -> &'f mut ContextAccess<'a>
+    where
+        'a: 'f,
+    {
+        &mut self.context_access
+    }
+}
+impl From<NodeControl<'_>> for NodeControlResult {
+    fn from(control: NodeControl) -> Self {
         Self {
-            rerender_flag: false,
+            rerender_flag: control.rerender_flag,
         }
     }
+}
+
+pub struct NodeControlResult {
+    rerender_flag: bool,
 }
 
 pub struct StepReport {
@@ -40,20 +53,18 @@ impl Default for StepReport {
 
 pub struct NodeHost {
     root: NodeRcc,
-    storage: NodeStorage,
+    storage: NodeLake,
     work_queue: VecDeque<WorkItem>,
 }
 
 impl NodeHost {
     pub fn create_with_root(root_node: Node) -> NodeHost {
         let mut work_queue: VecDeque<WorkItem> = Default::default();
-        let mut storage: NodeStorage = Default::default();
+        let storage: NodeLake = Default::default();
         let root: NodeRcc = root_node.into();
 
-        storage.insert(&root);
-
         work_queue.push_front(WorkItem {
-            kind: crate::WorkItemKind::Rerender,
+            kind: crate::WorkItemKind::Render,
             source: root.clone(),
         });
 
@@ -69,46 +80,57 @@ impl NodeHost {
         let work_opt = self.work_queue.pop_front();
         match &work_opt {
             Some(work) => match work.kind {
-                crate::WorkItemKind::Rerender => self.rerender(&work.source),
+                crate::WorkItemKind::Render => self.render(&work.source),
             },
             None => StepReport::default(),
         }
     }
 
-    fn rerender(&mut self, node_rcc: &NodeRcc) -> StepReport {
+    fn render(&mut self, node_rcc: &NodeRcc) -> StepReport {
         let mut render_count = 0_u32;
-        let mut renderables_in_current_cycle = VecDeque::from(vec![node_rcc.clone()]);
+        let mut next_render_queues = VecDeque::from(vec![node_rcc.clone()]);
         let mut local_work_queue = VecDeque::new();
 
         loop {
-            let renderable = renderables_in_current_cycle.pop_back();
-            match renderable {
-                None => break,
-                Some(currently_rendered_node_rcc) => {
-                    let mut control = NodeControl::default();
+            let mut local_render_queues = VecDeque::new();
+            std::mem::swap(&mut next_render_queues, &mut local_render_queues);
+
+            if local_render_queues.len() == 0 {
+                break;
+            }
+
+            local_render_queues
+                .into_iter()
+                .for_each(|currently_rendered_node_rcc| {
                     let mut trashed_nodes: Vec<NodeRcc> = Default::default();
                     let children = self
                         .storage
-                        .borrow_children_mapping(&currently_rendered_node_rcc);
-                    {
-                        let node_borrow = currently_rendered_node_rcc.borrow_mut();
-                        let mut step_fn_borrow = node_borrow.step_fn.borrow_mut();
+                        .mutate_children_mapping(&currently_rendered_node_rcc);
 
-                        let cached_children_map = {
-                            let mut children_map: HashMap<String, NodeRcc> = HashMap::new();
-                            children.iter().for_each(|child| {
-                                let key = child.borrow().key.clone();
-                                children_map.insert(key, child.clone());
-                            });
-                            children_map
+                    let (node_control_result, new_nodes) = {
+                        let mut node_borrow_refmut = currently_rendered_node_rcc.borrow_mut();
+                        let node_borrow = &mut *node_borrow_refmut;
+                        let step_fn_borrow = &mut *(node_borrow.step_fn.borrow_mut());
+                        let context_holder_borrow = &mut node_borrow.context_holder;
+
+                        let mut control = NodeControl {
+                            context_access: ContextAccess {
+                                context_holder_ref: context_holder_borrow,
+                            },
+                            rerender_flag: false,
                         };
+
+                        let children_lookup_map: HashMap<String, &NodeRcc> = children
+                            .iter()
+                            .map(|child| (child.borrow().key.clone(), child))
+                            .collect();
 
                         // execute_step_fn
                         let new_nodes: Vec<NodeRcc> =
-                            (*step_fn_borrow)(&mut control, &node_borrow.input)
+                            (step_fn_borrow)(&mut control, &node_borrow.input)
                                 .into_iter()
                                 .map(|new_child_node| -> NodeRcc {
-                                    let old_child = cached_children_map.get(&new_child_node.key);
+                                    let old_child = children_lookup_map.get(&new_child_node.key);
                                     match old_child {
                                         None => new_child_node.into(),
                                         Some(old_node_rcc) => {
@@ -119,37 +141,42 @@ impl NodeHost {
                                                     &old_node_borrow,
                                                 )
                                             } {
-                                                trashed_nodes.push(old_node_rcc.clone());
+                                                trashed_nodes.push((*old_node_rcc).clone());
                                                 new_child_node.into()
                                             } else {
                                                 let mut old_node_borrow = old_node_rcc.borrow_mut();
                                                 old_node_borrow.input =
-                                                    new_child_node.inherit_input();
-                                                old_node_rcc.clone()
+                                                    new_child_node.clone_input();
+                                                (*old_node_rcc).clone()
                                             }
                                         }
                                     }
                                 })
                                 .collect();
 
-                        // append  to renderables
-                        renderables_in_current_cycle.append(&mut VecDeque::from(new_nodes.clone()));
+                        let result: NodeControlResult = control.into();
+                        (result, new_nodes)
+                    };
 
-                        // mutate children
-                        *children = new_nodes;
+                    // Append render tasks to queue
+                    next_render_queues.append(&mut VecDeque::from(new_nodes.clone()));
 
-                        // End of render lifetime
-                        // Borrow mut is dropped here
-                    }
+                    // assign children
+                    *children = new_nodes;
+
+                    // create reverse children mapping
+                    self.storage
+                        .generate_parent_link_for_children(&currently_rendered_node_rcc);
 
                     // clean up trash
                     trashed_nodes.iter().for_each(|trashed_node_rcc| {
                         self.storage.unlink_recursively(trashed_node_rcc);
                     });
 
-                    if control.rerender_flag {
+                    // push rerender to workqueue
+                    if node_control_result.rerender_flag {
                         local_work_queue.push_back(WorkItem {
-                            kind: crate::WorkItemKind::Rerender,
+                            kind: crate::WorkItemKind::Render,
                             source: currently_rendered_node_rcc.clone(),
                         });
                     }
@@ -158,8 +185,7 @@ impl NodeHost {
                         Some(x) => render_count + x,
                         None => render_count,
                     }
-                }
-            }
+                });
         }
 
         self.work_queue.append(&mut local_work_queue);

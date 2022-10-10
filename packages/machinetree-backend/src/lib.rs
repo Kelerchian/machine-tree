@@ -37,5 +37,5 @@ pub(crate) struct WorkItem {
 
 #[derive(Clone)]
 pub(crate) enum WorkItemKind {
-    Rerender,
+    Render,
 }
