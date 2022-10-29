@@ -6,6 +6,4 @@ edition = "2018"
 package = ["macro"]
 
 [dependencies]
-machinetree-macro = { path = "packages/machinetree-macro" }
 machinetree-backend = { path = "packages/machinetree-backend" }
-crossbeam = "0.8.1"
