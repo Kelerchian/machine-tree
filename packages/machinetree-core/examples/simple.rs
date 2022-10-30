@@ -1,4 +1,4 @@
-use machinetree_backend::{
+use machinetree_core::{
     self,
     node::{Component, NodeSeed},
     node_host::{NodeControl, NodeHost},

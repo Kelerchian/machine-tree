@@ -1,9 +1,3 @@
-[package]
-name = "machinetree"
-version = "0.1.0"
-authors = ["Alan Darmasaputra <kelerchian@gmail.com>"]
-edition = "2018"
-package = ["macro"]
-
-[dependencies]
-machinetree-backend = { path = "packages/machinetree-backend" }
+[workspace]
+resolver = "2"
+members=["packages/*"]
