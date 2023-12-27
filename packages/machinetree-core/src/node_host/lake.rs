@@ -1,6 +1,6 @@
 use crate::{
     embeddable::context_holder::ContextHolder,
-    node::{NodeDataRaw, NodeKey, NodeKeyArc, NodeKeyWeak, NodeSeed},
+    key::{Key, KeyArc, KeyWeak, RawData, Seed},
 };
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -10,12 +10,12 @@ use std::{
 
 #[derive(Default)]
 pub struct NodeRelations {
-    pub(crate) children: Vec<NodeKeyWeak>,
-    pub(crate) parent: Option<NodeKeyWeak>,
+    pub(crate) children: Vec<KeyWeak>,
+    pub(crate) parent: Option<KeyWeak>,
 }
 
 pub struct NodeDataPoint {
-    pub(crate) self_data: Rc<RefCell<NodeDataRaw>>,
+    pub(crate) self_data: Rc<RefCell<RawData>>,
     pub(crate) context_holder: Rc<RefCell<ContextHolder>>,
     pub(crate) relations: Rc<RefCell<NodeRelations>>,
 }
@@ -33,7 +33,7 @@ impl NodeDataPoint {
         self.context_holder.borrow_mut()
     }
 
-    pub(crate) fn borrow_data_mut<'a>(&'a self) -> RefMut<NodeDataRaw> {
+    pub(crate) fn borrow_data_mut<'a>(&'a self) -> RefMut<RawData> {
         self.self_data.borrow_mut()
     }
 }
@@ -55,22 +55,22 @@ impl NodeData {
 
 #[derive(Default)]
 pub struct NodeLake {
-    pub(crate) data_map: HashMap<NodeKey, NodeData>,
+    pub(crate) data_map: HashMap<Key, NodeData>,
 }
 
 impl NodeLake {
-    pub(crate) fn remove(&mut self, node_key: &NodeKey) -> Option<NodeData> {
+    pub(crate) fn remove(&mut self, node_key: &Key) -> Option<NodeData> {
         self.data_map.remove(node_key)
     }
 
-    pub(crate) fn consume_seed_as_linked_node(&mut self, node_seed: NodeSeed) -> (NodeKey, NodeData) {
-        let (node_handle, node_raw) = node_seed.split();
-        let node_key_arc: NodeKeyArc = node_handle.into();
-        let node_key: NodeKey = node_key_arc.into();
+    pub(crate) fn sprout_and_link(&mut self, node_seed: Seed) -> (Key, NodeData) {
+        let (raw_key, raw_data) = node_seed.sprout();
+        let node_key_arc: KeyArc = raw_key.into();
+        let node_key = Key::new_from_raw(raw_key);
 
         let node_data_pointer = self.entry(node_key.clone()).or_insert(
             NodeDataPoint {
-                self_data: node_raw.into(),
+                self_data: raw_data.into(),
                 context_holder: Default::default(),
                 relations: Default::default(),
             }
@@ -80,42 +80,14 @@ impl NodeLake {
         (node_key, node_data_pointer.clone())
     }
 
-    pub(crate) fn get<'a>(&'a self, key: &NodeKey) -> Option<NodeData> {
+    pub(crate) fn get<'a>(&'a self, key: &Key) -> Option<NodeData> {
         self.data_map.get(key).map(|x| x.clone())
     }
 
     pub(crate) fn entry<'a>(
         &'a mut self,
-        node_rcc: NodeKey,
-    ) -> std::collections::hash_map::Entry<'a, NodeKey, NodeData> {
-        self.data_map.entry(NodeKey::from(node_rcc))
+        node_rcc: Key,
+    ) -> std::collections::hash_map::Entry<'a, Key, NodeData> {
+        self.data_map.entry(Key::from(node_rcc))
     }
-
-    // pub fn borrow<'a>(&'a self, node_rcc: &'a NodeArc) -> Option<&'a NodeData> {
-    //     self.data_map.get(&NodeHashKey::from(node_rcc))
-    // }
-
-    // pub fn borrow_mut<'a>(&'a mut self, node_rcc: &'a NodeArc) -> Option<&'a mut NodeData> {
-    //     self.data_map.get_mut(&NodeHashKey::from(node_rcc))
-    // }
-
-    // pub fn borrow_or_create_mut<'a>(
-    //     &'a mut self,
-    //     node_hash_key: NodeHashKey,
-    // ) -> &'a mut NodeDataContainer {
-    //     self.data_map
-    //         .entry(node_hash_key)
-    //         .or_insert(Default::default())
-    // }
-
-    // pub fn borrow_or_create_mut_children_mapping<'a>(
-    //     &'a mut self,
-    //     node_hash_key: NodeHashKey,
-    // ) -> &'a mut Vec<NodeWeak> {
-    //     &mut self
-    //         .data_map
-    //         .entry(node_hash_key)
-    //         .or_insert(Default::default())
-    //         .children
-    // }
 }

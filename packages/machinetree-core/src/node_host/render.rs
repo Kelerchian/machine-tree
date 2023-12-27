@@ -1,21 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::key::{Key, Seed};
+
 use super::{
     lake::{NodeData, NodeDataPoint, NodeLake},
     ExternalRenderWorkQueue, NodeControl, NodeControlResult,
 };
-use crate::node::{NodeKey, NodeSeed};
 
 pub(crate) struct RenderParam<'a> {
     pub(crate) lake: &'a mut NodeLake,
     pub(crate) external_render_work_queue: &'a ExternalRenderWorkQueue,
-    pub(crate) node_key: &'a NodeKey,
+    pub(crate) node_key: &'a Key,
     pub(crate) node_data_point: &'a NodeDataPoint,
 }
 
 pub(crate) struct RenderResult {
-    pub(crate) new_nodes: Vec<NodeKey>,
-    pub(crate) unused_nodes: Vec<NodeKey>,
+    pub(crate) new_nodes: Vec<Key>,
+    pub(crate) unused_nodes: Vec<Key>,
     pub(crate) node_control_result: NodeControlResult,
 }
 
@@ -55,11 +56,11 @@ pub(crate) fn render(param: RenderParam) -> RenderResult {
 
 struct StepParam<'a> {
     pub(crate) lake: &'a NodeLake,
-    pub(crate) node_key: &'a NodeKey,
+    pub(crate) node_key: &'a Key,
     pub(crate) node_data_point: &'a NodeDataPoint,
 }
 struct StepResult {
-    pub(crate) new_seeds: Vec<NodeSeed>,
+    pub(crate) new_seeds: Vec<Seed>,
     pub(crate) node_control_result: NodeControlResult,
 }
 
@@ -91,41 +92,46 @@ struct ReconciliationParam<'a> {
     pub(crate) lake: &'a mut NodeLake,
     pub(crate) external_render_work_queue: &'a ExternalRenderWorkQueue,
     pub(crate) node_data_point: &'a NodeDataPoint,
-    pub(crate) new_seeds: Vec<NodeSeed>,
+    pub(crate) new_seeds: Vec<Seed>,
 }
 
 struct ReconciliationResult {
-    pub(crate) new_nodes: Vec<NodeKey>,
-    pub(crate) unused_nodes: Vec<NodeKey>,
+    pub(crate) new_nodes: Vec<Key>,
+    pub(crate) unused_nodes: Vec<Key>,
 }
 
-fn reconcile<'a>(param: ReconciliationParam) -> ReconciliationResult {
-    let ReconciliationParam {
+fn reconcile<'a>(
+    ReconciliationParam {
         lake,
         external_render_work_queue,
         node_data_point,
         new_seeds,
-    } = param;
+    }: ReconciliationParam,
+) -> ReconciliationResult {
+    let children = &mut node_data_point.borrow_mut_relations().children;
 
-    let children_ref_mut = &mut node_data_point.borrow_mut_relations().children;
+    let supposed_new_order: HashMap<_, _> = new_seeds.iter().map(|x| (&x.key, &x)).collect();
+
+    // Set aside keyed
 
     // Inquire trashed nodes
-    let mut unused_nodes: HashSet<NodeKey> = {
+    let mut unused_node_keys: HashSet<Key> = {
         // HashMap mapping new seeds by its key
-        let new_seed_lookup_map: HashMap<&String, &NodeSeed> =
-            new_seeds.iter().map(|seed| (&seed.key, seed)).collect();
+        let new_seed_lookup_map: HashMap<&String, &Seed> =
+            new_seeds.iter().map(|seed| (&seed.key.key, seed)).collect();
 
-        let unused_nodes = children_ref_mut
+        let unused_nodes = children
             .iter()
             .filter_map(|child| child.upgrade())
-            .filter_map(|child| -> Option<NodeKey> {
-                let matching_seed_found = child.lock().map_or(false, |child_key_raw| {
+            .filter_map(|child| child.lock().ok())
+            .filter_map(|child| -> Option<Key> {
+                let is_a_match = child.lock().map_or(false, |child_key| {
                     new_seed_lookup_map
-                        .get(&child_key_raw.key)
-                        .map_or(false, |new_seed| new_seed.type_id == child_key_raw.type_id)
+                        .get(&child_key.key)
+                        .map_or(false, |new_seed| new_seed.key.type_id == child_key.type_id)
                 });
 
-                if !matching_seed_found {
+                if !is_a_match {
                     Some(child.into())
                 } else {
                     None
@@ -136,11 +142,11 @@ fn reconcile<'a>(param: ReconciliationParam) -> ReconciliationResult {
         unused_nodes
     };
 
-    let new_nodes: Vec<NodeKey> = {
-        let mut old_children_lookup_map: HashMap<String, NodeKey> = children_ref_mut
+    let new_node_keys: Vec<Key> = {
+        let mut old_children_lookup_map: HashMap<String, Key> = children
             .iter()
-            .filter_map(|child| -> Option<NodeKey> { child.try_into().ok() })
-            .filter_map(|child| -> Option<(String, NodeKey)> {
+            .filter_map(|child| -> Option<Key> { child.try_into().ok() })
+            .filter_map(|child| -> Option<(String, Key)> {
                 let key = child.0.try_lock().ok()?.key.clone();
                 Some((key, child.into()))
             })
@@ -148,11 +154,11 @@ fn reconcile<'a>(param: ReconciliationParam) -> ReconciliationResult {
 
         new_seeds
             .into_iter()
-            .map(|new_seed| -> NodeKey {
+            .map(|new_seed| -> Key {
                 let mut unused_old_key_opt = None;
 
                 // Find old key, reuse if possible, mark as unused if not
-                if let Some(old_key) = old_children_lookup_map.remove(&new_seed.key) {
+                if let Some(old_key) = old_children_lookup_map.remove(&new_seed.key.key) {
                     if let Ok(_) = merge_seed_to_nodekey(lake, &new_seed, &old_key) {
                         // Old_child is reusable
                         return old_key;
@@ -165,16 +171,16 @@ fn reconcile<'a>(param: ReconciliationParam) -> ReconciliationResult {
                 // Past this point, use new seed to create a new node
 
                 if let Some(unused_old_key) = unused_old_key_opt {
-                    unused_nodes.insert(unused_old_key.clone());
+                    unused_node_keys.insert(unused_old_key.clone());
                 }
 
                 // Consume seed into lake, and get the linked nodekey
-                let (node_key, _) = lake.consume_seed_as_linked_node(new_seed);
+                let (node_key, _) = lake.sprout_and_link(new_seed);
 
                 // TODO: handle deadlock
                 // Set self-signal on a new node_key
                 if let Ok(mut node_key_raw) = node_key.lock() {
-                    node_key_raw.self_render_signaler.set_self(
+                    node_key_raw.self_render.set_self(
                         &node_key.clone(),
                         &external_render_work_queue.sender.clone(),
                     );
@@ -186,22 +192,18 @@ fn reconcile<'a>(param: ReconciliationParam) -> ReconciliationResult {
     };
 
     ReconciliationResult {
-        new_nodes,
-        unused_nodes: unused_nodes.into_iter().collect(),
+        new_nodes: new_node_keys,
+        unused_nodes: unused_node_keys.into_iter().collect(),
     }
 }
 
-fn merge_seed_to_nodekey(
-    lake: &mut NodeLake,
-    new_seed: &NodeSeed,
-    node_key: &NodeKey,
-) -> Result<(), ()> {
+fn merge_seed_to_nodekey(lake: &mut NodeLake, new_seed: &Seed, node_key: &Key) -> Result<(), ()> {
     // TODO: handle deadlocks
     // Don't merge if node_key.lock() fails
     let old_child_handle = node_key.lock().map_err(|_| Default::default())?;
 
     // Don't if type_id is different
-    if old_child_handle.type_id != new_seed.type_id {
+    if old_child_handle.type_id != new_seed.key.type_id {
         return Err(Default::default());
     }
 
@@ -217,9 +219,9 @@ fn merge_seed_to_nodekey(
 
 pub(crate) fn link_children_to_lake<'a>(
     lake: &'a mut NodeLake,
-    node_key: &NodeKey,
+    node_key: &Key,
     node_data_point: &'a NodeDataPoint,
-    new_nodes: &Vec<NodeKey>,
+    new_nodes: &Vec<Key>,
 ) {
     // Assign children weak nodes
     node_data_point.borrow_mut_relations().children =
@@ -236,11 +238,11 @@ pub(crate) fn link_children_to_lake<'a>(
     });
 }
 
-pub type UnlinkedPair = (NodeKey, NodeData);
+pub type UnlinkedPair = (Key, NodeData);
 
 pub(crate) fn unlink_unused_nodes<'a>(
     lake: &'a mut NodeLake,
-    unused_nodes: Vec<NodeKey>,
+    unused_nodes: Vec<Key>,
 ) -> Vec<UnlinkedPair> {
     unused_nodes
         .into_iter()
@@ -253,7 +255,7 @@ pub(crate) fn unlink_unused_nodes<'a>(
 
 fn unlink_recursively<'a>(
     lake: &'a mut NodeLake,
-    into_nodeshell: impl TryInto<NodeKey>,
+    into_nodeshell: impl TryInto<Key>,
 ) -> Vec<UnlinkedPair> {
     into_nodeshell
         .try_into()

@@ -15,3 +15,4 @@ image = "0.24"
 wgpu = { version = "0.14", features = ["spirv"] }
 pollster = "0.2"
 futures-intrusive = "0.4"
+petgraph = "0.6.4"

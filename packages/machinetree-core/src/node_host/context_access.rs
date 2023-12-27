@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use super::lake::NodeLake;
-use crate::{embeddable::context_holder::ContextContainer, node::NodeKey};
+use crate::{embeddable::context_holder::ContextContainer, key::Key};
 
 #[derive(Clone)]
 pub struct NodeNavigator {
-    pub(crate) current: NodeKey,
+    pub(crate) current: Key,
 }
 
 impl NodeNavigator {
@@ -20,7 +20,7 @@ impl NodeNavigator {
 }
 pub struct ContextAccess<'a> {
     pub(crate) lake: &'a NodeLake,
-    pub(crate) node_key_pointer: NodeKey,
+    pub(crate) node_key_pointer: Key,
 }
 
 impl<'a> ContextAccess<'a> {

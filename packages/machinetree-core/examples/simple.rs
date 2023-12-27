@@ -57,7 +57,7 @@ impl Component for ExampleComponent {
 }
 
 fn main() {
-    let mut host = NodeHost::create_with_root(ExampleComponent::seed(
+    let mut host = NodeHost::make_root(ExampleComponent::seed(
         Param {
             parent_index_chain: String::from("root"),
             self_index: 0,
